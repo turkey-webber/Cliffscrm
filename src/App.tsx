@@ -11,7 +11,7 @@ import {
   type Company,
   type Dialer,
 } from "./data";
-import { buildNextList, buildRouteStops, routeSummary, toDialToday } from "./flow";
+import { buildNextList, buildRouteStops, companyMapsQuery, routeSummary, toDialToday } from "./flow";
 import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
@@ -52,10 +52,12 @@ type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
 type MorePane = "home" | "blitz" | "import" | "settings" | "company" | "newsletter";
 type TodayMode = "desk" | "truck";
 
-const IMPROVE_URL =
-  typeof window !== "undefined"
-    ? `${window.location.origin}/?open=newsletter-improve`
-    : "https://cliffscrm.apps.grok.bot/?open=newsletter-improve";
+const IMPROVE_URL = (() => {
+  if (typeof window === "undefined") return "https://turkey-webber.github.io/Cliffscrm/?open=newsletter-improve";
+  const base = import.meta.env.BASE_URL || "/";
+  const root = `${window.location.origin}${base}`.replace(/\/+$/, "/");
+  return `${root}?open=newsletter-improve`;
+})();
 
 const LOCK_MS = 10 * 60 * 1000;
 const CALLER = "Cliff";
@@ -70,18 +72,35 @@ type UndoState = {
 
 function mapsUrl(stops: Company[]): string {
   const origin = encodeURIComponent(OFFICE.address);
-  const withCoords = stops.filter((s) => s.lat && s.lng);
-  if (!withCoords.length) return `https://www.google.com/maps/dir/?api=1&origin=${origin}`;
-  const dest = withCoords[withCoords.length - 1];
-  const mid = withCoords.slice(0, -1);
-  const waypoints = mid.map((s) => `${s.lat},${s.lng}`).join("|");
-  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${encodeURIComponent(`${dest.lat},${dest.lng}`)}${waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ""}`;
+  if (!stops.length) return `https://www.google.com/maps/dir/?api=1&origin=${origin}`;
+  const dest = encodeURIComponent(companyMapsQuery(stops[stops.length - 1]));
+  const mid = stops.slice(0, -1).map((s) => companyMapsQuery(s)).filter(Boolean);
+  const waypoints = mid.length ? `&waypoints=${encodeURIComponent(mid.join("|"))}` : "";
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypoints}`;
 }
 
 function appleMapsUrl(c: Company): string {
-  const daddr = encodeURIComponent(`${c.address}, ${c.city}, AL`);
+  const daddr = encodeURIComponent(companyMapsQuery(c));
   const saddr = encodeURIComponent(OFFICE.address);
   return `https://maps.apple.com/?saddr=${saddr}&daddr=${daddr}&dirflg=d`;
+}
+
+function googleMapsStopUrl(c: Company): string {
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(OFFICE.address)}&destination=${encodeURIComponent(companyMapsQuery(c))}`;
+}
+
+function resultFromWrap(draft: WrapUp): CallResult {
+  if (draft.outcome === "skip") return "skip";
+  if (draft.outcome === "voicemail") return "voicemail";
+  const blob = `${draft.otherResults} ${draft.resultGoals.join(" ")} ${draft.otherGoals}`.toLowerCase();
+  if (draft.resultGoals.includes("Appointment Set") || /\bappt|appointment\b/.test(blob)) return "appointment";
+  if (/job\s*order|\border\b/.test(blob)) return "job_order";
+  if (/not interested|no interest/.test(blob)) return "not_interested";
+  if (/call\s*back|callback/.test(blob)) return "callback";
+  if (/voicemail|left message|\bvm\b/.test(blob)) return "voicemail";
+  if (/discovery/.test(blob)) return "discovery";
+  if (draft.outcome === "capture") return "discovery";
+  return "discovery";
 }
 
 function releaseExpiredLocks(list: Company[], now: number): Company[] {
@@ -432,13 +451,13 @@ function CaptureSheet({
   async function onPhoto(file: File) {
     const lower = file.name.toLowerCase();
     if (lower.endsWith(".txt") || lower.endsWith(".md") || file.type.startsWith("text/")) {
-      commit(await file.text(), "photo");
+      setMode("photo");
+      setText(await file.text());
       return;
     }
-    // OCR isn't available offline — store a photo note prompt with filename.
-    commit(`Photo capture: ${file.name}\n(Paste OCR / yellow-pad text below if needed)\n`, "photo");
-    setMode("type");
-    setText(`Photo capture: ${file.name}\n`);
+    // OCR isn't available offline — draft a photo note; user confirms Save.
+    setMode("photo");
+    setText(`Photo capture: ${file.name}\n(Paste OCR / yellow-pad text below if needed)\n`);
   }
 
   return (
@@ -451,14 +470,14 @@ function CaptureSheet({
           </button>
         </div>
         <p className="subtle">Under 5 seconds · no required fields · finishes later in inbox</p>
-        <div className="row wrap" style={{ margin: "0.75rem 0" }}>
-          <button className={`chip ${mode === "voice" ? "chip-active" : ""}`} onClick={() => { setMode("voice"); startVoice(); }}>
+        <div className="segment segment-3" role="tablist" aria-label="Capture mode" style={{ margin: "0.75rem 0" }}>
+          <button type="button" className={mode === "voice" ? "on" : ""} onClick={() => { setMode("voice"); startVoice(); }}>
             {listening ? "Listening…" : "Voice"}
           </button>
-          <button className={`chip ${mode === "photo" ? "chip-active" : ""}`} onClick={() => fileRef.current?.click()}>
+          <button type="button" className={mode === "photo" ? "on" : ""} onClick={() => fileRef.current?.click()}>
             Photo
           </button>
-          <button className={`chip ${mode === "type" ? "chip-active" : ""}`} onClick={() => setMode("type")}>
+          <button type="button" className={mode === "type" ? "on" : ""} onClick={() => setMode("type")}>
             Type
           </button>
         </div>
@@ -540,8 +559,11 @@ export default function App() {
   const [selectedMpc, setSelectedMpc] = useState<string | null>(null);
   const [newsletterSuggestion, setNewsletterSuggestion] = useState("");
   const [newsletterBusy, setNewsletterBusy] = useState(false);
-  const [newsletterPrefs, setNewsletterPrefs] = useState<NewsletterPrefs>(DEFAULT_NEWSLETTER_PREFS);
+  const [newsletterPrefs, setNewsletterPrefs] = useState<NewsletterPrefs>(initial.newsletterPrefs || DEFAULT_NEWSLETTER_PREFS);
   const [newsletterApplied, setNewsletterApplied] = useState("");
+  const [assignCaptureId, setAssignCaptureId] = useState<string | null>(null);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const pendingScore = useRef<{ result: CallResult; points: number } | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -589,8 +611,9 @@ export default function App() {
       captures,
       mpc,
       todayMode,
+      newsletterPrefs,
     });
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode]);
+  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode, newsletterPrefs]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -740,25 +763,50 @@ export default function App() {
       flash(err);
       return;
     }
+    const pending = pendingScore.current;
+    pendingScore.current = null;
+    const lastResult: CallResult = pending?.result ?? resultFromWrap(draft);
     const event = {
       id: `t-${Date.now().toString(36)}`,
       at: new Date().toISOString(),
       kind: "wrapup",
-      summary: `${draft.outcome.replace("_", " ")} · next ${draft.futureDate}`,
+      summary: `${draft.outcome.replace("_", " ")} · ${resultLabel(lastResult)} · next ${draft.futureDate}`,
       detail: draft.otherResults || draft.otherGoals,
     };
-    setWrapUps((prev) => [draft, ...prev.filter((w) => w.id !== draft.id)]);
-    setCompanies((prev) =>
-      prev.map((c) => {
+    const nextWraps = [draft, ...wrapUps.filter((w) => w.id !== draft.id)];
+    setWrapUps(nextWraps);
+
+    let nextCompanies: Company[] = [];
+    setCompanies((prev) => {
+      nextCompanies = prev.map((c) => {
         if (c.id !== draft.companyId) return c;
         if (draft.outcome === "skip") {
-          return { ...c, blitzState: "open", lockedBy: undefined, lockUntil: undefined };
+          return { ...c, blitzState: "open" as const, lockedBy: undefined, lockUntil: undefined };
         }
-        const noteLine = `${draft.resultDate} · ${CALLER}: ${draft.otherResults || draft.outcome}`;
+        // Capture notes land on timeline without burning the dial state unless it was a real dial.
+        if (draft.outcome === "capture") {
+          const noteLine = `${draft.resultDate} · ${CALLER} capture: ${draft.otherResults || draft.outcome}`;
+          return {
+            ...c,
+            lockedBy: undefined,
+            lockUntil: undefined,
+            notes: [c.notes, noteLine].filter(Boolean).join("\n"),
+            timeline: [...(c.timeline || []), { ...event, kind: "capture" }],
+          };
+        }
+        const points = pending?.points ?? scoreFor(lastResult, c, DEFAULT_POINTS);
+        const today = todayIso();
+        // Re-open only when the next touch is due today (or undated callback).
+        // Future-dated callbacks stay "called" until due, so Save & next advances.
+        const reopen =
+          Boolean(draft.futureDate && draft.futureDate <= today) ||
+          (lastResult === "callback" && !draft.futureDate);
+        const noteLine = `${draft.resultDate} · ${CALLER}: ${draft.otherResults || resultLabel(lastResult)}`;
         return {
           ...c,
-          blitzState: "called",
-          lastResult: draft.outcome === "voicemail" ? "voicemail" : "discovery",
+          blitzState: reopen ? ("open" as const) : ("called" as const),
+          lastResult,
+          lastScore: points || undefined,
           lastCaller: CALLER,
           lastContacted: draft.resultDate,
           nextTouch: draft.futureDate,
@@ -767,20 +815,44 @@ export default function App() {
           notes: [c.notes, noteLine].filter(Boolean).join("\n"),
           timeline: [...(c.timeline || []), event],
         };
-      }),
-    );
-    if (draft.outcome !== "skip") setCallsDone((n) => n + 1);
+      });
+      return nextCompanies;
+    });
+
+    if (draft.outcome !== "skip" && draft.outcome !== "capture") {
+      const target = liveCompanies.find((c) => c.id === draft.companyId);
+      const points = pending?.points ?? (target ? scoreFor(lastResult, target, DEFAULT_POINTS) : 0);
+      if (points) {
+        setMyScore((s) => s + points);
+        const previous = liveCompanies.find((c) => c.id === draft.companyId);
+        if (previous) {
+          setUndo({
+            companyId: previous.id,
+            previous: structuredClone(previous),
+            points,
+            label: resultLabel(lastResult),
+            expires: Date.now() + 10_000,
+          });
+        }
+      }
+      setCallsDone((n) => n + 1);
+    }
     if (draft.resultGoals.includes("Appointment Set")) setVisitsDone((n) => n + 1);
     if (draft.captureId) {
       setCaptures((prev) =>
         prev.map((cap) => (cap.id === draft.captureId ? { ...cap, status: "done" as const } : cap)),
       );
     }
+    setAssignCaptureId(null);
     setWrapDraft(null);
-    flash("Wrap-up saved");
+    flash(draft.outcome === "capture" ? "Capture filed" : "Wrap-up saved");
     if (advance) {
-      const nxt = nextList.find((n) => n.company.id !== draft.companyId);
-      if (nxt) setActiveId(nxt.company.id);
+      const rebuilt = buildNextList(releaseExpiredLocks(nextCompanies, Date.now()), nextWraps);
+      const nxt = rebuilt.find((n) => n.company.id !== draft.companyId) || rebuilt[0];
+      if (nxt) {
+        setActiveId(nxt.company.id);
+        if (tab !== "more") setTab("today");
+      }
     }
   }
 
@@ -792,25 +864,33 @@ export default function App() {
       return;
     }
     if (result === "skip") {
+      pendingScore.current = null;
       openWrap(current, "skip");
       return;
     }
     if (result === "voicemail") {
+      pendingScore.current = { result, points: 0 };
       openWrap(current, "voicemail");
       return;
     }
-    // Got them / other meaningful outcomes → full wrap-up
-    openWrap(current, "got_them", resultLabel(result));
+    // Score only after wrap saves — keep pending until then.
     const points = scoreFor(result, current, DEFAULT_POINTS);
-    if (points) {
-      setMyScore((s) => s + points);
-      setUndo({
-        companyId: current.id,
-        previous: structuredClone(current),
-        points,
-        label: resultLabel(result),
-        expires: Date.now() + 10_000,
-      });
+    pendingScore.current = { result, points };
+    openWrap(current, "got_them", resultLabel(result));
+  }
+
+  function closeWrapSheet() {
+    const id = wrapDraft?.companyId;
+    pendingScore.current = null;
+    setWrapDraft(null);
+    if (id) {
+      setCompanies((prev) =>
+        prev.map((c) =>
+          c.id === id && c.blitzState === "locked"
+            ? { ...c, blitzState: "open" as const, lockedBy: undefined, lockUntil: undefined }
+            : c,
+        ),
+      );
     }
   }
 
@@ -849,7 +929,8 @@ export default function App() {
           ? `Stored ${result.facts.length} recall fact(s)`
           : "Nothing new to import",
     );
-    setTab("accounts");
+    setTab("today");
+    setTodayMode("desk");
     setMorePane("home");
   }
 
@@ -980,14 +1061,14 @@ export default function App() {
   function addProspectToBook(m: MpcMatch) {
     if (m.companyId) {
       setActiveId(m.companyId);
-      setTab("accounts");
+      setTab("more");
       setMorePane("company");
       return;
     }
     const existing = matchCompany(liveCompanies, m.companyName);
     if (existing) {
       setActiveId(existing.id);
-      setTab("accounts");
+      setTab("more");
       setMorePane("company");
       flash("Already in book");
       return;
@@ -1013,7 +1094,9 @@ export default function App() {
     };
     setCompanies((prev) => [company, ...prev]);
     setActiveId(id);
-    flash("Prospect added to book");
+    setTab("more");
+    setMorePane("company");
+    flash("Prospect added — open for Call / Wrap");
   }
 
   let main: ReactNode = null;
@@ -1038,6 +1121,20 @@ export default function App() {
           <button type="button" className={todayMode === "truck" ? "on" : ""} onClick={() => setTodayMode("truck")}>
             Truck
           </button>
+        </div>
+        <div className="score-strip" aria-label="Daily progress">
+          <div className="score-cell">
+            <strong className="mono">{toDialCount}</strong>
+            <span>To dial</span>
+          </div>
+          <div className="score-cell">
+            <strong className="mono">{callsDone}/{OFFICE.callGoal}</strong>
+            <span>Calls</span>
+          </div>
+          <div className="score-cell">
+            <strong className="mono">{visitsDone}/{OFFICE.visitGoal}</strong>
+            <span>Visits</span>
+          </div>
         </div>
         {!deskItems.length && (
           <div className="demo-banner">
@@ -1127,11 +1224,25 @@ export default function App() {
                   <strong>{c.name}</strong>
                   <div className="muted">
                     {[c.address, c.city].filter(Boolean).join(", ") || "Address missing"}
+                    {c.phone ? ` · ${c.phone}` : ""}
+                  </div>
+                  <div className="row wrap" style={{ marginTop: "0.45rem" }}>
+                    <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
+                      Apple
+                    </a>
+                    <a className="btn btn-ghost" href={googleMapsStopUrl(c)} target="_blank" rel="noreferrer">
+                      Google
+                    </a>
                   </div>
                 </div>
-                <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
-                  Apple
-                </a>
+                <div className="stack">
+                  <button className="btn btn-primary" onClick={() => dial(c)}>
+                    Call
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => openWrap(c, "got_them")}>
+                    Wrap
+                  </button>
+                </div>
               </div>
             ))}
             {!!routeStops.length && (
@@ -1148,50 +1259,102 @@ export default function App() {
           </div>
         )}
         {!!inbox.length && (
-          <div className="card">
+          <div className="panel">
             <h2>Capture inbox</h2>
             <p>{inbox.length} unfinished · orange = older than 24h</p>
             {inbox.map((cap) => {
               const stale = now - cap.createdAt > 24 * 60 * 60 * 1000;
+              const company: Company | undefined =
+                (cap.companyId ? liveCompanies.find((c) => c.id === cap.companyId) : undefined) ||
+                (cap.companyGuess ? matchCompany(liveCompanies, cap.companyGuess) : undefined);
+              const assigning = assignCaptureId === cap.id;
               return (
-                <button
+                <div
                   key={cap.id}
                   className="list-item"
                   style={{
-                    width: "100%",
-                    textAlign: "left",
                     background: stale ? "var(--warn-bg)" : "transparent",
-                    borderRadius: "0.75rem",
-                  }}
-                  onClick={() => {
-                    const company =
-                      (cap.companyId && liveCompanies.find((c) => c.id === cap.companyId)) ||
-                      (cap.companyGuess && matchCompany(liveCompanies, cap.companyGuess));
-                    if (company) {
-                      setWrapDraft(
-                        blankWrapUp({
-                          companyId: company.id,
-                          companyName: company.name,
-                          phone: company.phone,
-                          companyRep: company.contactName,
-                          futureRep: company.contactName,
-                          outcome: "capture",
-                          otherResults: cap.text,
-                          captureId: cap.id,
-                          callType: "Other call - telephone",
-                        }),
-                      );
-                    } else {
-                      flash("Pick a company in Accounts, then wrap");
-                      setTab("accounts");
-                    }
+                    borderRadius: "0.55rem",
+                    flexDirection: "column",
+                    alignItems: "stretch",
                   }}
                 >
-                  <div style={{ flex: 1 }}>
-                    <strong>{cap.companyGuess || "Unassigned"}</strong>
-                    <div className="muted">{cap.text.slice(0, 120)}</div>
+                  <div className="row" style={{ width: "100%", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <strong>{company?.name || cap.companyGuess || "Unassigned"}</strong>
+                      <div className="muted">{cap.text.slice(0, 120)}</div>
+                    </div>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        if (company) {
+                          setWrapDraft(
+                            blankWrapUp({
+                              companyId: company.id,
+                              companyName: company.name,
+                              phone: company.phone,
+                              companyRep: company.contactName,
+                              futureRep: company.contactName,
+                              outcome: "capture",
+                              otherResults: cap.text,
+                              captureId: cap.id,
+                              callType: "Other call - telephone",
+                            }),
+                          );
+                        } else {
+                          setAssignCaptureId(cap.id);
+                        }
+                      }}
+                    >
+                      {company ? "File" : "Assign"}
+                    </button>
                   </div>
-                </button>
+                  {assigning && (
+                    <div style={{ marginTop: "0.55rem", width: "100%" }}>
+                      <label className="field-label" htmlFor={`assign-${cap.id}`}>
+                        Link to company
+                      </label>
+                      <select
+                        id={`assign-${cap.id}`}
+                        className="select"
+                        defaultValue=""
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const picked = liveCompanies.find((c) => c.id === id);
+                          if (!picked) return;
+                          setCaptures((prev) =>
+                            prev.map((x) =>
+                              x.id === cap.id
+                                ? { ...x, companyId: picked.id, companyGuess: picked.name }
+                                : x,
+                            ),
+                          );
+                          setWrapDraft(
+                            blankWrapUp({
+                              companyId: picked.id,
+                              companyName: picked.name,
+                              phone: picked.phone,
+                              companyRep: picked.contactName,
+                              futureRep: picked.contactName,
+                              outcome: "capture",
+                              otherResults: cap.text,
+                              captureId: cap.id,
+                              callType: "Other call - telephone",
+                            }),
+                          );
+                          setAssignCaptureId(null);
+                        }}
+                      >
+                        <option value="">Select company…</option>
+                        {liveCompanies.slice(0, 80).map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -1426,7 +1589,14 @@ export default function App() {
           <label className="field-label">Day</label>
           <input className="select" type="date" value={q4Day} onChange={(e) => setQ4Day(e.target.value)} />
         </div>
-        {!dayWraps.length && <p className="empty">No wrap-ups on this day.</p>}
+        {!dayWraps.length && (
+          <div className="demo-banner">
+            No wrap-ups on this day. Dial from Today, then Save — cards land here for Q4 paste.
+            <button className="btn btn-accent btn-block" style={{ marginTop: "0.65rem" }} onClick={() => setTab("today")}>
+              Go to Today
+            </button>
+          </div>
+        )}
         {dayWraps.map((w) => {
           const copy = wrapUpCardCopy(w);
           return (
@@ -1469,7 +1639,13 @@ export default function App() {
   } else if (morePane === "company" && active) {
     main = (
       <>
-        <button className="btn btn-ghost" onClick={() => setTab("accounts")}>
+        <button
+          className="btn btn-ghost"
+          onClick={() => {
+            setMorePane("home");
+            setTab("accounts");
+          }}
+        >
           ← Accounts
         </button>
         <div className="section-head">
@@ -1717,9 +1893,8 @@ export default function App() {
               </div>
             )}
             <button
-              className="fab suggest-fab"
-              aria-label="Suggest"
-              title="Suggest an idea / Report a problem"
+              className="btn btn-ghost btn-block"
+              style={{ marginTop: "0.65rem" }}
               onClick={() => {
                 const body = encodeURIComponent(
                   `Suggest an idea / Report a problem\n\nFrom: ${CALLER}\nScreen: Team desk / Blitz\nCompany: ${active.name}\n\nIdea or problem:\n`,
@@ -1728,7 +1903,7 @@ export default function App() {
                 flash("Opening email to Cliff");
               }}
             >
-              ?
+              Email feedback
             </button>
           </>
         )}
@@ -1940,16 +2115,32 @@ export default function App() {
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
-        <div className="dial-pill" aria-label={`To dial today ${toDialCount}`}>
+        <button
+          type="button"
+          className="dial-pill"
+          aria-label={`To dial today ${toDialCount}`}
+          onClick={() => {
+            setTab("today");
+            setTodayMode("desk");
+          }}
+        >
           <strong className="mono">{toDialCount}</strong>
           <span>To dial</span>
-        </div>
+        </button>
       </header>
 
       <main className="main">{main}</main>
 
       <button className="fab capture-fab" aria-label="Capture" title="Capture" onClick={() => setCaptureOpen(true)}>
         +
+      </button>
+      <button
+        className="fab suggest-fab"
+        aria-label="Suggest script"
+        title="Suggest"
+        onClick={() => setScriptOpen(true)}
+      >
+        ?
       </button>
 
       <nav className="tabbar tabbar-5" aria-label="Primary">
@@ -1982,6 +2173,72 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
       {copySheet && <CopySheet text={copySheet} onClose={() => setCopySheet(null)} />}
+      {scriptOpen && (
+        <div className="sheet-overlay" role="dialog" aria-label="Suggest">
+          <div className="sheet-card">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2 style={{ margin: 0 }}>Suggest</h2>
+              <button className="btn btn-ghost" onClick={() => setScriptOpen(false)}>
+                Close
+              </button>
+            </div>
+            <p className="subtle">
+              {active ? `For ${active.name}` : "Pick a company from Today or Accounts first"}
+            </p>
+            {active && (
+              <>
+                <div className="panel-box" style={{ marginTop: "0.75rem" }}>
+                  <h3 style={{ marginTop: 0 }}>Opener</h3>
+                  <p>{openerFor(active)}</p>
+                  <button
+                    className="btn btn-ghost btn-block"
+                    onClick={() => void copyText(openerFor(active), "opener")}
+                  >
+                    Copy opener
+                  </button>
+                </div>
+                <div className="panel">
+                  <h3>Front desk</h3>
+                  <p>{FRONT_DESK_LINE}</p>
+                </div>
+                <div className="panel">
+                  <h3>Objections</h3>
+                  {OBJECTION_LINES.map((line) => (
+                    <div key={line.id} style={{ marginTop: "0.55rem" }}>
+                      <strong>{line.label}</strong>
+                      <div className="muted">{line.reply}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="panel">
+                  <h3>Weinberg cards</h3>
+                  {WEINBERG_CARDS.map((card) => (
+                    <div key={card.title} style={{ marginTop: "0.55rem" }}>
+                      <strong>{card.title}</strong>
+                      <div className="muted">{card.body}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="btn btn-primary btn-block"
+                  style={{ marginTop: "0.75rem" }}
+                  onClick={() => {
+                    setScriptOpen(false);
+                    openWrap(active, "got_them");
+                  }}
+                >
+                  Open wrap-up
+                </button>
+              </>
+            )}
+            {!active && (
+              <button className="btn btn-accent btn-block" onClick={() => { setScriptOpen(false); setTab("today"); }}>
+                Go to Today
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {captureOpen && (
         <CaptureSheet
           companies={liveCompanies}
@@ -2019,7 +2276,7 @@ export default function App() {
         <WrapUpSheet
           draft={wrapDraft}
           onChange={setWrapDraft}
-          onClose={() => setWrapDraft(null)}
+          onClose={closeWrapSheet}
           onSaveNext={() => persistWrap(wrapDraft, true)}
           onSaveStay={() => persistWrap(wrapDraft, false)}
         />
