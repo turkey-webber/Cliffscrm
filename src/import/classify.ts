@@ -54,9 +54,9 @@ function classifyByHeaders(headers: string[]): ImportRole | null {
   // ZoomInfo-style people CSV (company often from filename)
   if (
     (has(/^first name$|^first$/) && has(/^last name$|^last$/)) &&
-    (has(/zoominfo|management level/) || !has(/company name|^company$/))
+    (has(/zoominfo|management level|email address|direct phone/) || !has(/^company name$|^company$/))
   ) {
-    return "other";
+    return "zoominfo_people";
   }
 
   // Contact Summary: company rep OR exact call type
@@ -111,6 +111,7 @@ export function classifyImport(name: string, mimeType = "", textSample = ""): Im
   if (/territory\s*new\s*leads|hiring signal/.test(n)) return "blitz_list";
   if (/blitz\s*list|blitz\s*board|sales\s*blitz|call[-_\s]?reasons|inside\s*sales\s*call/.test(n)) return "blitz_list";
   if (/first[-_\s]?year|new[-_\s]?first|counts as new|gm ytd/.test(n)) return "blitz_list";
+  if (/zoominfo|zi[-_]?people|management level/.test(n)) return "zoominfo_people";
   if (/contact\s*summary|\bcs[\s._-]?\d|\bcs\s+\d|all[-_]?contacts|cliffs-crm-companies|contact\s*list/.test(n)) {
     return "contact_summary";
   }
@@ -136,5 +137,6 @@ export const ROLE_LABEL: Record<ImportRole, string> = {
   blitz_list: "Blitz / territory list",
   blitz_research: "Blitz research",
   script_library: "Script library",
+  zoominfo_people: "ZoomInfo people",
   other: "Other",
 };

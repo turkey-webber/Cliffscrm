@@ -374,13 +374,144 @@ function mergeBookRecord(existing: Company | undefined, incoming: Company): Comp
     lastResult: existing.lastResult,
     lastScore: existing.lastScore,
     lastCaller: existing.lastCaller,
+    // Q4 Sales Planner locks — Contact Summary / ZoomInfo enrich but never clear planner fields
     plannerOrder: existing.plannerOrder,
     fromPlanner: existing.fromPlanner,
+    nextTouch: existing.nextTouch || incoming.nextTouch,
     inBook: true,
     fromContactSummary: true,
     lat: existing.lat ?? incoming.lat,
     lng: existing.lng ?? incoming.lng,
   };
+}
+
+/**
+ * ZoomInfo people CSV → attach verified contacts to the book.
+ * Company from "Company Name" column, else filename (e.g. Capital Tractor.csv).
+ * Never invents phones — only uses columns present in the file.
+ * Does not override Q4 plannerOrder / fromPlanner / nextTouch.
+ */
+function applyZoomInfoPeople(
+  book: Company[],
+  table: ParsedTable,
+  fileName: string,
+): { companies: Company[]; updated: number; facts: RecallFact[] } {
+  const facts: RecallFact[] = [];
+  if (!table.headers.length) return { companies: book, updated: 0, facts };
+  const fileCompany = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  let next = book.slice();
+  let updated = 0;
+  const date = new Date().toISOString().slice(0, 10);
+
+  for (const row of table.rows) {
+    const first = col(table.headers, row, ["first name", "first"]);
+    const last = col(table.headers, row, ["last name", "last"]);
+    const person = [first, last].filter(Boolean).join(" ").trim();
+    if (!person) continue;
+    const title = col(table.headers, row, ["job title", "title", "management level"]);
+    const phone =
+      col(table.headers, row, [
+        "direct phone number",
+        "mobile phone",
+        "phone",
+        "hq phone",
+        "company phone",
+      ]) || "";
+    const email = col(table.headers, row, ["email address", "email"]);
+    const companyName =
+      col(table.headers, row, ["company name", "company", "account"]) || fileCompany;
+    if (!companyName) continue;
+
+    let hit = matchCompany(next, companyName);
+    if (!hit && fileCompany) hit = matchCompany(next, fileCompany);
+    const factBits = [
+      person + (title ? `, ${title}` : ""),
+      phone ? `phone ${phone}` : "",
+      email ? `email ${email}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    if (!hit) {
+      // New prospect shell from ZoomInfo — no invented fields beyond the CSV
+      const shell: Company = {
+        id: slugId(companyName),
+        name: companyName,
+        city: col(table.headers, row, ["company city", "city"]) || "",
+        address: "",
+        phone,
+        contactName: person,
+        contactTitle: title,
+        territory: "",
+        badges: ["prospect"],
+        research: [{ source: `ZoomInfo · ${fileName}`, date, fact: factBits.slice(0, 500) }],
+        notes: `ZoomInfo people · ${fileName}`,
+        timeline: [
+          {
+            id: `zi-${Date.now().toString(36)}-${updated}`,
+            at: new Date().toISOString(),
+            kind: "research",
+            summary: `ZoomInfo · ${person}`,
+            detail: title || undefined,
+          },
+        ],
+        blitzState: "open",
+        inBook: false,
+        fromContactSummary: false,
+      };
+      next.push(shell);
+      updated++;
+      facts.push({
+        id: `fact-zi-${Math.random().toString(36).slice(2, 9)}`,
+        companyHint: companyName,
+        fact: factBits.slice(0, 400),
+        source: `ZoomInfo · ${fileName}`,
+        date,
+        role: "zoominfo_people",
+      });
+      continue;
+    }
+
+    next = next.map((c) => {
+      if (c.id !== hit!.id) return c;
+      const locked = Boolean(c.fromPlanner || c.plannerOrder != null);
+      return {
+        ...c,
+        // Prefer existing Q4 rep; fill gaps only
+        contactName: c.contactName || person,
+        contactTitle: c.contactTitle || title,
+        phone: c.phone || phone,
+        research: [
+          ...c.research,
+          { source: `ZoomInfo · ${fileName}`, date, fact: factBits.slice(0, 500) },
+        ],
+        timeline: [
+          ...(c.timeline || []),
+          {
+            id: `zi-${Date.now().toString(36)}-${c.id}`,
+            at: new Date().toISOString(),
+            kind: "research",
+            summary: `ZoomInfo · ${person}`,
+            detail: locked ? "Q4 appointment preserved" : title || undefined,
+          },
+        ],
+        notes: [c.notes, !c.contactName ? `ZoomInfo contact: ${person}` : ""]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    });
+    updated++;
+    facts.push({
+      id: `fact-zi-${Math.random().toString(36).slice(2, 9)}`,
+      companyHint: hit.name,
+      fact: factBits.slice(0, 400),
+      source: `ZoomInfo · ${fileName}`,
+      date,
+      role: "zoominfo_people",
+    });
+  }
+
+  return { companies: next, updated, facts };
 }
 
 /** Apply planner stops onto the Contact Summary book: enrich matches, stub the rest, set order. */
@@ -446,12 +577,17 @@ export function ingestParsed(
 ): ImportBatchResult {
   const newest = selectNewestByRole(items.map((i) => i.meta));
   const newestIds = new Set(newest.map((f) => f.id));
+  // ZoomInfo people CSVs are per-company — keep all of them, not one-per-role.
+  for (const item of items) {
+    if (item.meta.role === "zoominfo_people") newestIds.add(item.meta.id);
+  }
   const pruned = items.map((i) => i.meta).filter((m) => !newestIds.has(m.id)).length;
   const used = items.filter((i) => newestIds.has(i.meta.id)).map((i) => ({ ...i.meta, kept: true }));
 
   const byRole = new Map<ImportRole, IngestItem>();
   for (const item of items) {
     if (!newestIds.has(item.meta.id)) continue;
+    if (item.meta.role === "zoominfo_people") continue; // handled in dedicated multi-file pass
     byRole.set(item.meta.role, item);
   }
 
@@ -491,11 +627,25 @@ export function ingestParsed(
   }
 
   // 2) Sales Planner = Today's ordered queue (enrich from Book)
+  // Planner stops are locked Q4 appointments — later Scout/Grok leads never rewrite their order.
   const planner = byRole.get("sales_planner");
   if (planner) {
     const stops = stopsFromPlanner(planner.table, planner.meta.name);
     plannerCount = stops.length;
     book = applyPlannerToBook(book, stops);
+  }
+
+  // 2b) ZoomInfo people CSVs — keep every company file (not one-per-role), enrich contacts.
+  // Filename often = company (Capital Tractor.csv). Never overrides Q4 planner locks.
+  let zoomCount = 0;
+  for (const item of items) {
+    if (item.meta.role !== "zoominfo_people") continue;
+    const applied = applyZoomInfoPeople(book, item.table, item.meta.name);
+    book = applied.companies;
+    zoomCount += applied.updated;
+    facts.push(...applied.facts);
+    // mark kept so recall shows them
+    item.meta.kept = true;
   }
 
   // 3) Secondary files → recall facts (inbox rows preferred when structured)
@@ -512,6 +662,7 @@ export function ingestParsed(
   const parts = [
     cs ? `CS ${csCount}` : null,
     planner ? `Planner ${plannerCount}` : null,
+    zoomCount ? `ZoomInfo ${zoomCount}` : null,
     facts.length ? `${facts.length} facts` : null,
     pruned ? `pruned ${pruned}` : null,
   ].filter(Boolean);

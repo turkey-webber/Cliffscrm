@@ -45,6 +45,7 @@ import {
 } from "./newsletter";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import { buildJobOrderLeads, leadSourceLabel, recentResearchFeed } from "./leads";
 import {
   DEFAULT_SCOUT_PREFS,
   SCOUT_JOB_TYPES,
@@ -107,7 +108,7 @@ type MorePane =
   | "priority"
   | "daily"
   | "scout";
-type ScoutPane = "brief" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
+type ScoutPane = "brief" | "leads" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
 type TodayMode = "desk" | "truck";
 
 const IMPROVE_URL = (() => {
@@ -768,6 +769,11 @@ export default function App() {
       }),
     [allScoutJobs, scoutPrefs.distanceMi, scoutPrefs.jobTypes, scoutQuery],
   );
+  const jobOrderLeads = useMemo(
+    () => buildJobOrderLeads(liveCompanies, allScoutJobs),
+    [liveCompanies, allScoutJobs],
+  );
+  const researchFeed = useMemo(() => recentResearchFeed(liveCompanies, 10), [liveCompanies]);
 
   useEffect(() => {
     const c = dayLead?.company;
@@ -1521,10 +1527,32 @@ export default function App() {
             onClick={() => {
               setTab("more");
               setMorePane("scout");
+              setScoutPane("leads");
+            }}
+          >
+            Leads{jobOrderLeads.length ? <span className="count">{Math.min(jobOrderLeads.length, 99)}</span> : null}
+          </button>
+          <button
+            type="button"
+            className="day-chip"
+            onClick={() => {
+              setTab("more");
+              setMorePane("scout");
+              setScoutPane("plan");
+            }}
+          >
+            Plan
+          </button>
+          <button
+            type="button"
+            className="day-chip"
+            onClick={() => {
+              setTab("more");
+              setMorePane("scout");
               setScoutPane("brief");
             }}
           >
-            Scout{scoutTen.length ? <span className="tab-badge">{scoutTen.length}</span> : null}
+            Scout{scoutTen.length ? <span className="count">{scoutTen.length}</span> : null}
           </button>
           {q4Pending > 0 ? (
             <button type="button" className="day-chip" onClick={() => setTab("q4")}>
@@ -1694,6 +1722,47 @@ export default function App() {
               {" · "}
               {plannerFile ? "Planner on" : "No planner"}
             </p>
+          </div>
+        )}
+        {todayMode === "desk" && researchFeed.length > 0 && (
+          <div className="panel">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+              <h2 style={{ margin: 0 }}>Research</h2>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: "0.25rem 0.55rem", fontSize: "0.75rem" }}
+                onClick={() => {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("leads");
+                }}
+              >
+                Job-order leads
+              </button>
+            </div>
+            <p className="subtle">Routine facts from Q4 book, Scout, Grok, ZoomInfo, territory — newest first.</p>
+            {researchFeed.map((r) => (
+              <button
+                key={`${r.companyId}-${r.fact.slice(0, 24)}`}
+                type="button"
+                className="list-item"
+                style={{ width: "100%", textAlign: "left" }}
+                onClick={() => {
+                  setActiveId(r.companyId);
+                  setTab("more");
+                  setMorePane("company");
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <strong>{r.companyName}</strong>
+                  <div className="muted">
+                    {r.source}
+                    {r.date ? ` · ${r.date}` : ""} — {r.fact}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         )}
         {todayMode === "desk" ? (
@@ -2706,6 +2775,7 @@ export default function App() {
           {(
             [
               ["brief", "Brief"],
+              ["leads", "Leads"],
               ["today10", "Today 10"],
               ["jobs", "Jobs"],
               ["prospect", "Prospect"],
@@ -2809,6 +2879,75 @@ export default function App() {
               ))}
             </div>
           </>
+        )}
+
+        {scoutPane === "leads" && (
+          <div className="panel">
+            <h2>Job-order leads</h2>
+            <p className="subtle">
+              Q4 Express CRM is export-only (Contact Summary + Sales Planner). Priority: Q4
+              appointments → Q4 book → ZoomInfo → Grok/Scout → territory. Appointments are never
+              overridden.
+            </p>
+            {!jobOrderLeads.length && (
+              <p className="empty">Sync Drop Q4 exports or Sweep Scout to fill leads.</p>
+            )}
+            {jobOrderLeads.slice(0, 40).map((lead) => (
+              <div key={lead.id} className="card" style={{ marginBottom: "0.55rem" }}>
+                <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                  <div>
+                    <strong>{lead.company.name}</strong>
+                    <div className="subtle">
+                      <span className="chip">{leadSourceLabel(lead.source)}</span>
+                      {lead.lockedAppointment ? " · locked appt" : ""}
+                      {lead.contactName ? ` · ${lead.contactName}` : ""}
+                      {lead.phone ? ` · ${lead.phone}` : " · No phone"}
+                    </div>
+                    <div className="muted">{lead.why}</div>
+                    <div className="muted">Ask: {lead.ask}</div>
+                  </div>
+                </div>
+                <div className="row" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => {
+                      if (lead.company.inBook === false && lead.company.id.startsWith("scout-lead-")) {
+                        pushScoutToToday({
+                          id: lead.company.id.replace(/^scout-lead-/, ""),
+                          company: lead.company.name,
+                          title: lead.jobHint,
+                          city: lead.company.city,
+                          phone: lead.phone,
+                          source: lead.source === "grok" ? "grok" : lead.source === "territory" ? "territory" : "paste",
+                          firstSeen: todayIso(),
+                          daysOpen: 0,
+                          kind: "hiring",
+                          jobTypes: [],
+                        });
+                        return;
+                      }
+                      setActiveId(lead.company.id);
+                      if (lead.phone) dial(lead.company);
+                      else openWrap(lead.company, "got_them");
+                    }}
+                  >
+                    {lead.phone ? "Call" : "Open"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ flex: 1 }}
+                    onClick={() => {
+                      setActiveId(lead.company.id);
+                      setCopySheet(formatPasteBlock("Q4 Job Order Quick Entry", jobOrderQuickEntryFields(lead.company)));
+                    }}
+                  >
+                    Job order paste
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {scoutPane === "today10" && (
@@ -3035,8 +3174,8 @@ export default function App() {
             <div className="panel">
               <h2>Day plan</h2>
               <p className="subtle">
-                Calendar shows Q4 / planner appointments first. Suggested nearby stops add below them —
-                never moves locked appointments.
+                Calendar for today and future dates. Q4 / Sales Planner appointments stay locked.
+                Suggested nearby stops (from book coords) Add under them — never reorders Q4.
               </p>
               <div className="scout-cal">
                 {scoutCalendar.map((d) => (
@@ -3114,9 +3253,17 @@ export default function App() {
           <div className="panel">
             <h2>Contact research</h2>
             <p className="subtle">
-              ZoomInfo-style desk — verified book contacts only. Research links open out; never invent
-              a name or phone.
+              ZoomInfo-style desk — verified book contacts only. Drop a ZoomInfo people CSV (often named
+              after the company) via Import / Sync Drop to attach reps. Research links open out; never
+              invent a name or phone.
             </p>
+            <button
+              className="btn btn-ghost btn-block"
+              style={{ marginBottom: "0.55rem" }}
+              onClick={() => setMorePane("import")}
+            >
+              Import ZoomInfo CSV
+            </button>
             <input
               className="field-input"
               value={scoutQuery}
