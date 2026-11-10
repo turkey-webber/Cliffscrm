@@ -600,7 +600,13 @@ export default function App() {
     (async () => {
       try {
         const probe = await fetch("/api/drop-sync");
-        const data = (await probe.json()) as { configured?: boolean; files?: unknown[] };
+        const raw = await probe.text();
+        let data: { configured?: boolean; files?: unknown[] } = {};
+        try {
+          data = JSON.parse(raw) as typeof data;
+        } catch {
+          return; // static host without API
+        }
         if (cancelled || !data.configured || !data.files?.length) return;
         if (!cancelled) void onSyncDrive();
       } catch {
@@ -629,7 +635,7 @@ export default function App() {
   useEffect(() => {
     if (!mpcDropHandle) return;
     const tick = () => {
-      void scanMpcDropFolder(mpcDropHandle);
+      void scanMpcDropFolder(mpcDropHandle, { silent: true });
     };
     const id = window.setInterval(tick, 45_000);
     return () => window.clearInterval(id);
@@ -1002,7 +1008,8 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "sync" }),
       });
-      const data = (await res.json()) as {
+      const raw = await res.text();
+      let data: {
         configured?: boolean;
         message?: string;
         error?: string;
@@ -1015,6 +1022,12 @@ export default function App() {
           contentBase64: string;
         }[];
       };
+      try {
+        data = JSON.parse(raw) as typeof data;
+      } catch {
+        flash("Drive sync needs the Cursor-hosted app (APIs unavailable on this host)");
+        return;
+      }
       if (!data.configured) {
         flash(data.message || "Drive not configured — use manual import");
         return;
@@ -1153,7 +1166,8 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "pull", seenIds: mpcSeenIds }),
       });
-      const data = (await res.json()) as {
+      const raw = await res.text();
+      let data: {
         configured?: boolean;
         message?: string;
         error?: string;
@@ -1167,7 +1181,16 @@ export default function App() {
           from?: string;
           messageId?: string;
         }[];
-      };
+      } = {};
+      try {
+        data = JSON.parse(raw) as typeof data;
+      } catch {
+        // Static hosts (Pages / vite preview) serve HTML for /api/* — stay quiet on auto-pull.
+        if (!opts?.silent) {
+          flash("cliffsgrokbox sync needs the Cursor-hosted app (APIs unavailable here)");
+        }
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "Inbox sync failed");
       if (!data.configured) {
         if (!opts?.silent) flash(data.message || "cliffsgrokbox inbox not configured");
@@ -1191,10 +1214,14 @@ export default function App() {
         });
         added++;
       }
-      flash(added ? `Inbox → ${added} MPC candidate${added === 1 ? "" : "s"}` : data.message || "Nothing parsed");
-      if (added) setTab("mpc");
+      if (added) {
+        flash(`Inbox → ${added} MPC candidate${added === 1 ? "" : "s"}`);
+        setTab("mpc");
+      } else if (!opts?.silent) {
+        flash(data.message || "Nothing parsed");
+      }
     } catch (e) {
-      flash(e instanceof Error ? e.message : "Inbox sync failed");
+      if (!opts?.silent) flash(e instanceof Error ? e.message : "Inbox sync failed");
     } finally {
       setMpcIngestBusy(null);
     }
@@ -1217,15 +1244,15 @@ export default function App() {
     }
   }
 
-  async function scanMpcDropFolder(handle = mpcDropHandle) {
+  async function scanMpcDropFolder(handle = mpcDropHandle, opts?: { silent?: boolean }) {
     if (!handle) return;
-    setMpcIngestBusy("folder");
+    if (!opts?.silent) setMpcIngestBusy("folder");
     try {
       const seen = new Set(mpcSeenIds);
       const hits = await scanDropFolder(handle, seen);
       const resumeHits = hits.filter((h) => isResumeFileName(h.name, h.file.type));
       if (!resumeHits.length) {
-        flash("Drop folder watched — no new resumes");
+        if (!opts?.silent) flash("Drop folder watched — no new resumes");
         return;
       }
       await ingestResumeFiles(
@@ -1233,9 +1260,9 @@ export default function App() {
         "folder",
       );
     } catch (e) {
-      flash(e instanceof Error ? e.message : "Folder scan failed");
+      if (!opts?.silent) flash(e instanceof Error ? e.message : "Folder scan failed");
     } finally {
-      setMpcIngestBusy(null);
+      if (!opts?.silent) setMpcIngestBusy(null);
     }
   }
 
