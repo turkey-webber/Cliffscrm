@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { companiesFromCsv } from "./csv";
 import {
   DEMO_COMPANIES,
   DEFAULT_POINTS,
@@ -11,6 +10,10 @@ import {
   type Company,
   type Dialer,
 } from "./data";
+import { classifyImport, ROLE_LABEL } from "./import/classify";
+import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
+import { loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles, emptyRecall } from "./import/recall";
+import type { RecallStore } from "./import/types";
 import {
   callNoteFields,
   companyRecordFields,
@@ -309,10 +312,10 @@ function TodayScreen({
         )}
       </div>
       <button className="btn btn-primary btn-block" onClick={onCopyNotes}>
-        Email today’s notes (copy)
+        Copy today’s notes
       </button>
       <p className="subtle" style={{ marginTop: "0.45rem" }}>
-        Also scheduled conceptually for 4:30 PM Central weekdays once mail is wired.
+        Paste into your afternoon wrap-up when you’re ready.
       </p>
     </>
   );
@@ -756,13 +759,25 @@ function Q4Pane({ active, onBack, onCopy }: { active: Company; onBack: () => voi
 
 function ImportPane({
   onBack,
-  onCsvFile,
+  onManualFiles,
+  onSyncDrive,
+  onPruneNewest,
   onResetDemo,
+  busy,
+  recall,
 }: {
   onBack: () => void;
-  onCsvFile: (file: File) => void;
+  onManualFiles: (files: FileList) => void;
+  onSyncDrive: () => void;
+  onPruneNewest: () => void;
   onResetDemo: () => void;
+  busy: string | null;
+  recall: RecallStore;
 }) {
+  const roleCounts = recall.files.reduce<Record<string, number>>((acc, f) => {
+    acc[f.role] = (acc[f.role] || 0) + 1;
+    return acc;
+  }, {});
   return (
     <>
       <button className="btn btn-ghost" onClick={onBack}>
@@ -770,32 +785,83 @@ function ImportPane({
       </button>
       <div className="section-head">
         <h1>Import</h1>
-        <p>Upload Express CSV exports. Phones only if the file has them.</p>
+        <p>Grok Drop sync + manual upload. Word, Excel, PDF, CSV, Markdown — newest of each kind wins.</p>
       </div>
       <div className="card">
-        <h2>Expected files</h2>
-        <p>Contact summary → Book</p>
-        <p>Sales Planner → Today</p>
-        <p>Express Sales Blitz Board → Team desk</p>
-        <p>Expeditor Inbox.csv / 2026 new-client CSV</p>
+        <h2>Auto roles</h2>
+        <p>Contact summary / CS → Book</p>
+        <p>Sales planner (Word) → Today stops</p>
+        <p>Blitz list / board → Team desk</p>
+        <p>Blitz research → recall facts on matching companies</p>
+        <p>Expeditor inbox → recall notes</p>
       </div>
-      <label className="btn btn-primary btn-block btn-lg file-btn">
-        Upload CSV
+      <button className="btn btn-primary btn-block btn-lg" disabled={!!busy} onClick={onSyncDrive}>
+        {busy === "drive" ? "Syncing Grok Drop…" : "Sync Grok Drop (Drive)"}
+      </button>
+      <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
+        {busy === "manual" ? "Importing…" : "Manual import (any files)"}
         <input
           type="file"
-          accept=".csv,text/csv"
+          multiple
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          accept=".csv,.xlsx,.xls,.docx,.doc,.pdf,.md,.txt,text/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          disabled={!!busy}
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onCsvFile(f);
+            if (e.target.files?.length) onManualFiles(e.target.files);
             e.target.value = "";
           }}
         />
       </label>
+      <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
+        Or pick individual files
+        <input
+          type="file"
+          multiple
+          accept=".csv,.xlsx,.xls,.docx,.doc,.pdf,.md,.txt,text/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          disabled={!!busy}
+          onChange={(e) => {
+            if (e.target.files?.length) onManualFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </label>
+      <button
+        className="btn btn-warn btn-block"
+        style={{ marginTop: "0.55rem" }}
+        disabled={!!busy || recall.files.length < 2}
+        onClick={onPruneNewest}
+      >
+        Keep newest only (drop older of each kind)
+      </button>
+      <div className="card" style={{ marginTop: "0.85rem" }}>
+        <h2>Recall</h2>
+        <p>{recall.lastImportLog || "No imports yet"}</p>
+        <p className="subtle">
+          {recall.files.length} file(s) cataloged · {recall.facts.length} fact(s) stored
+          {recall.lastSync ? ` · synced ${new Date(recall.lastSync).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT` : ""}
+        </p>
+        {Object.keys(roleCounts).length > 0 && (
+          <div className="stack" style={{ marginTop: "0.65rem" }}>
+            {Object.entries(roleCounts).map(([role, n]) => (
+              <div key={role} className="row" style={{ justifyContent: "space-between" }}>
+                <span>{ROLE_LABEL[role as keyof typeof ROLE_LABEL] || role}</span>
+                <span className="subtle">{n}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {recall.facts.slice(0, 5).map((f) => (
+          <div key={f.id} style={{ marginTop: "0.55rem" }}>
+            <strong>{f.companyHint}</strong>
+            <div className="subtle">{f.fact.slice(0, 140)}</div>
+          </div>
+        ))}
+      </div>
       <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={onResetDemo}>
         Reset to demo book
       </button>
       <p className="subtle" style={{ marginTop: "0.55rem" }}>
-        Next: Google Drive “CliffMover Drop” + cliffsgrokbox@gmail.com subject “CliffMover”.
+        Phones stay blank unless present in the file. Drive sync uses your app secrets when configured.
       </p>
     </>
   );
@@ -912,10 +978,35 @@ export default function App() {
   const [locationLabel, setLocationLabel] = useState("Location off");
   const [userLatLng, setUserLatLng] = useState<{ lat: number; lng: number } | null>(null);
   const [copySheet, setCopySheet] = useState<string | null>(null);
+  const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
+  const [importBusy, setImportBusy] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    saveRecall(recall);
+  }, [recall]);
+
+  // Auto Drive sync once on launch when secrets are configured (agent + manual still available).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const probe = await fetch("/api/drop-sync");
+        const data = (await probe.json()) as { configured?: boolean; files?: unknown[] };
+        if (cancelled || !data.configured || !data.files?.length) return;
+        if (!cancelled) void onSyncDrive();
+      } catch {
+        /* manual import remains */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- launch-only auto sync
   }, []);
 
   useEffect(() => {
@@ -1130,44 +1221,93 @@ export default function App() {
     window.location.href = `tel:${c.phone}`;
   }
 
-  async function onCsvFile(file: File) {
-    const text = await file.text();
-    const { companies: incoming, imported, skipped } = companiesFromCsv(text, file.name);
-    if (!imported) {
-      setImportLog(`Import failed · ${file.name}`);
-      flash("Import failed — need a Company column");
-      return;
+  function applyImportResult(result: Awaited<ReturnType<typeof ingestBrowserFiles>>) {
+    setCompanies(result.companies);
+    setImportLog(result.log);
+    setRecall((prev) => upsertRecallFiles(prev, result.files, result.facts, result.log));
+    if (result.companies[0]) setActiveId(result.companies[0].id);
+    flash(
+      result.imported
+        ? `Imported ${result.imported} · pruned ${result.pruned} older`
+        : result.facts.length
+          ? `Stored ${result.facts.length} recall fact(s)`
+          : "Nothing new to import",
+    );
+    setTab(result.imported ? "book" : "more");
+    setMorePane(result.imported ? "home" : "import");
+  }
+
+  async function onManualFiles(files: FileList) {
+    setImportBusy("manual");
+    try {
+      const result = await ingestBrowserFiles(files, companies, recall.facts, classifyImport);
+      applyImportResult(result);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImportBusy(null);
     }
-    setCompanies((prev) => {
-      const byName = new Map(prev.map((c) => [c.name.toLowerCase(), c]));
-      for (const c of incoming) {
-        const key = c.name.toLowerCase();
-        const existing = byName.get(key);
-        if (existing) {
-          byName.set(key, {
-            ...existing,
-            phone: c.phone || existing.phone,
-            city: c.city || existing.city,
-            address: c.address || existing.address,
-            contactName: c.contactName || existing.contactName,
-            contactTitle: c.contactTitle || existing.contactTitle,
-            territory: c.territory || existing.territory,
-            lastBilled: c.lastBilled || existing.lastBilled,
-            notes: [existing.notes, c.notes].filter(Boolean).join("\n"),
-            research: [...existing.research, ...c.research],
-            badges: Array.from(new Set([...existing.badges, ...c.badges])),
-          });
-        } else {
-          byName.set(key, c);
-        }
+  }
+
+  async function onSyncDrive() {
+    setImportBusy("drive");
+    try {
+      const res = await fetch("/api/drop-sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "sync" }),
+      });
+      const data = (await res.json()) as {
+        configured?: boolean;
+        message?: string;
+        error?: string;
+        files?: {
+          id: string;
+          name: string;
+          mimeType: string;
+          modifiedTime: string;
+          size?: number;
+          contentBase64: string;
+        }[];
+      };
+      if (!data.configured) {
+        flash(data.message || "Drive not configured — use manual import");
+        return;
       }
-      return Array.from(byName.values());
-    });
-    const stamp = new Date().toLocaleString("en-US", { timeZone: "America/Chicago" });
-    setImportLog(`${file.name} · ${imported} loaded · ${skipped} skipped · ${stamp} CT`);
-    flash(`Imported ${imported} companies`);
-    setTab("book");
-    setMorePane("home");
+      if (data.error) {
+        flash(data.error);
+        return;
+      }
+      if (!data.files?.length) {
+        flash(data.message || "No files in Grok Drop");
+        return;
+      }
+      const result = await ingestDrivePayload(data.files, companies, recall.facts, classifyImport);
+      applyImportResult(result);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Drive sync failed");
+    } finally {
+      setImportBusy(null);
+    }
+  }
+
+  async function onPruneNewest() {
+    const { store, removed } = pruneRecallToNewest(recall);
+    setRecall(store);
+    setImportLog(store.lastImportLog);
+    const trashIds = removed.map((f) => f.driveFileId).filter(Boolean) as string[];
+    if (trashIds.length) {
+      try {
+        await fetch("/api/drop-sync", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "trash", trashIds }),
+        });
+      } catch {
+        /* local prune still applied */
+      }
+    }
+    flash(`Kept newest · removed ${removed.length}`);
   }
 
   function allowLocation() {
@@ -1282,7 +1422,11 @@ export default function App() {
     main = (
       <ImportPane
         onBack={() => setMorePane("home")}
-        onCsvFile={(f) => void onCsvFile(f)}
+        onManualFiles={(files) => void onManualFiles(files)}
+        onSyncDrive={() => void onSyncDrive()}
+        onPruneNewest={() => void onPruneNewest()}
+        busy={importBusy}
+        recall={recall}
         onResetDemo={() => {
           setCompanies(structuredClone(DEMO_COMPANIES));
           setActiveId(DEMO_COMPANIES[0].id);
@@ -1290,6 +1434,7 @@ export default function App() {
           setCallsDone(0);
           setVisitsDone(0);
           setImportLog("Reset to DEMO sample book");
+          setRecall(emptyRecall());
           flash("Demo data restored");
         }}
       />
