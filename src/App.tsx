@@ -1295,17 +1295,15 @@ export default function App() {
     const { store, removed } = pruneRecallToNewest(recall);
     setRecall(store);
     setImportLog(store.lastImportLog);
-    const trashIds = removed.map((f) => f.driveFileId).filter(Boolean) as string[];
-    if (trashIds.length) {
-      try {
-        await fetch("/api/drop-sync", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "trash", trashIds }),
-        });
-      } catch {
-        /* local prune still applied */
-      }
+    // Drive prune is server-decided (folder-scoped soft-trash). Never send file IDs from the client.
+    try {
+      await fetch("/api/drop-sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "pruneOlder" }),
+      });
+    } catch {
+      /* local prune still applied */
     }
     flash(`Kept newest · removed ${removed.length}`);
   }
