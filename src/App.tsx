@@ -773,12 +773,6 @@ export default function App() {
     setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }
 
-  async function readPlaudFile(file: File): Promise<string> {
-    const text = (await file.text()).trim();
-    if (!text) throw new Error("empty");
-    return text;
-  }
-
   function flash(msg: string) {
     setToast(msg);
   }
@@ -2019,64 +2013,6 @@ export default function App() {
           >
             {active.blitzState === "dnc" ? "Clear DNC" : "Do not call"}
           </button>
-        </div>
-        <div className="card">
-          <h2>Plaud</h2>
-          <p className="subtle">Share → TXT from Plaud. Stored on this company only.</p>
-          <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
-            Summary (.txt / .md / .srt)
-            <input
-              type="file"
-              accept=".txt,.md,.srt,text/plain"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (!f) return;
-                void readPlaudFile(f)
-                  .then((text) => {
-                    patchCompany(active.id, { plaudSummary: text });
-                    flash("Plaud summary saved");
-                  })
-                  .catch(() => flash("Could not read Plaud file"));
-              }}
-            />
-          </label>
-          <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.45rem" }}>
-            Transcript (.txt / .md / .srt)
-            <input
-              type="file"
-              accept=".txt,.md,.srt,text/plain"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (!f) return;
-                void readPlaudFile(f)
-                  .then((text) => {
-                    patchCompany(active.id, { plaudTranscript: text });
-                    flash("Plaud transcript saved");
-                  })
-                  .catch(() => flash("Could not read Plaud file"));
-              }}
-            />
-          </label>
-          {active.plaudSummary ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <strong>Summary</strong>
-              <pre className="q4-block">{active.plaudSummary.slice(0, 1200)}</pre>
-              <button
-                className="btn btn-ghost btn-block"
-                onClick={() => openWrap(active, "got_them", active.plaudSummary || "")}
-              >
-                Prefill wrap-up from summary
-              </button>
-            </div>
-          ) : null}
-          {active.plaudTranscript ? (
-            <div style={{ marginTop: "0.75rem" }}>
-              <strong>Transcript</strong>
-              <pre className="q4-block">{active.plaudTranscript.slice(0, 1200)}</pre>
-            </div>
-          ) : null}
         </div>
         <div className="card">
           <h2>Timeline</h2>
