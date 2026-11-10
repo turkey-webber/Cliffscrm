@@ -799,12 +799,11 @@ function ImportPane({
         {busy === "drive" ? "Syncing Grok Drop…" : "Sync Grok Drop (Drive)"}
       </button>
       <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
-        {busy === "manual" ? "Importing…" : "Manual import (any files)"}
+        {busy === "manual" ? "Importing…" : "Pick files from Drop"}
         <input
           type="file"
           multiple
-          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-          accept=".csv,.xlsx,.xls,.docx,.doc,.pdf,.md,.txt,text/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          // No accept filter: iOS Files/Drive often greys out .xlsx/.csv when MIME/UTI don't match.
           disabled={!!busy}
           onChange={(e) => {
             if (e.target.files?.length) onManualFiles(e.target.files);
@@ -813,11 +812,11 @@ function ImportPane({
         />
       </label>
       <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
-        Or pick individual files
+        Or pick a whole folder
         <input
           type="file"
           multiple
-          accept=".csv,.xlsx,.xls,.docx,.doc,.pdf,.md,.txt,text/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
           disabled={!!busy}
           onChange={(e) => {
             if (e.target.files?.length) onManualFiles(e.target.files);
