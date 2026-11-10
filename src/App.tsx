@@ -25,6 +25,14 @@ import {
   jobOrderQuickEntryFields,
   wrapUpCardCopy,
 } from "./q4";
+import {
+  NEWSLETTER_TO,
+  applySuggestionText,
+  buildNewsletter,
+  newsletterHtml,
+  type NewsletterPrefs,
+  DEFAULT_NEWSLETTER_PREFS,
+} from "./newsletter";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
 import {
@@ -41,8 +49,13 @@ import {
 } from "./wrapup";
 
 type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
-type MorePane = "home" | "blitz" | "import" | "settings" | "company";
+type MorePane = "home" | "blitz" | "import" | "settings" | "company" | "newsletter";
 type TodayMode = "desk" | "truck";
+
+const IMPROVE_URL =
+  typeof window !== "undefined"
+    ? `${window.location.origin}/?open=newsletter-improve`
+    : "https://cliffscrm.apps.grok.bot/?open=newsletter-improve";
 
 const LOCK_MS = 10 * 60 * 1000;
 const CALLER = "Cliff";
@@ -494,8 +507,11 @@ function CopySheet({ text, onClose }: { text: string; onClose: () => void }) {
 
 export default function App() {
   const initial = loadState();
-  const [tab, setTab] = useState<Tab>("today");
-  const [morePane, setMorePane] = useState<MorePane>("home");
+  const openImprove =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("open") === "newsletter-improve";
+  const [tab, setTab] = useState<Tab>(openImprove ? "more" : "today");
+  const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : "home");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
   const [wrapUps, setWrapUps] = useState<WrapUp[]>(initial.wrapUps);
@@ -522,6 +538,10 @@ export default function App() {
   const [mpcForm, setMpcForm] = useState({ name: "", trade: "", note: "", resumeText: "" });
   const [mpcBusy, setMpcBusy] = useState(false);
   const [selectedMpc, setSelectedMpc] = useState<string | null>(null);
+  const [newsletterSuggestion, setNewsletterSuggestion] = useState("");
+  const [newsletterBusy, setNewsletterBusy] = useState(false);
+  const [newsletterPrefs, setNewsletterPrefs] = useState<NewsletterPrefs>(DEFAULT_NEWSLETTER_PREFS);
+  const [newsletterApplied, setNewsletterApplied] = useState("");
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -585,6 +605,55 @@ export default function App() {
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
   const bookCount = liveCompanies.filter((c) => c.inBook || c.fromContactSummary).length;
+
+  const morningBrief = useMemo(
+    () =>
+      buildNewsletter({
+        companies: liveCompanies,
+        mpc,
+        prefs: newsletterPrefs,
+        improveUrl: IMPROVE_URL,
+      }),
+    [liveCompanies, mpc, newsletterPrefs],
+  );
+  const morningHtml = useMemo(() => newsletterHtml(morningBrief), [morningBrief]);
+
+  async function submitNewsletterSuggestion() {
+    const suggestion = newsletterSuggestion.trim();
+    if (suggestion.length < 3) {
+      flash("Write a short suggestion first");
+      return;
+    }
+    setNewsletterBusy(true);
+    try {
+      const res = await fetch("/api/newsletter", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "suggest", suggestion }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        prefs?: NewsletterPrefs;
+        applied?: string;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) throw new Error(data.error || "Save failed");
+      if (data.prefs) setNewsletterPrefs(data.prefs);
+      setNewsletterApplied(data.applied || data.message || "Saved");
+      setNewsletterSuggestion("");
+      flash(data.message || "Saved for tomorrow’s brief");
+    } catch (e) {
+      // Local fallback so improve link still works without Drive secrets
+      const next = applySuggestionText(newsletterPrefs, suggestion);
+      setNewsletterPrefs(next);
+      setNewsletterApplied(next.suggestions[0]?.applied || "Saved on this device");
+      setNewsletterSuggestion("");
+      flash(e instanceof Error ? `${e.message} · saved on device` : "Saved on device");
+    } finally {
+      setNewsletterBusy(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1741,6 +1810,76 @@ export default function App() {
           </p>
           <p className="subtle">{routeSummary(routeStops)}</p>
         </div>
+        <div className="card">
+          <h2>Hosting</h2>
+          <p>
+            Source is already on GitHub (<code>turkey-webber/Cliffscrm</code>). The live desk is Cursor-hosted as{" "}
+            <strong>cliffscrm</strong>. GitHub Pages can serve the static build as a second host if you want a
+            public mirror — say the word and we can wire Actions.
+          </p>
+        </div>
+      </>
+    );
+  } else if (morePane === "newsletter") {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Morning brief</h1>
+          <p>
+            Daily 7:00 AM CT → {NEWSLETTER_TO}
+          </p>
+        </div>
+        <div className="card">
+          <h2>Today’s draft</h2>
+          <p>
+            {morningBrief.prospects.length} ranked prospects · {morningBrief.mpc.length} MPC ·{" "}
+            {morningBrief.hiring.length} hiring signals
+          </p>
+          {morningBrief.prefsNote ? <p className="subtle">{morningBrief.prefsNote}</p> : null}
+          <div className="newsletter-preview" style={{ marginTop: "0.75rem" }}>
+            <iframe title="Morning brief preview" srcDoc={morningHtml} />
+          </div>
+        </div>
+        <div className="card">
+          <h2>Improve this email</h2>
+          <p>
+            Suggestions reshape tomorrow’s brief — e.g. “boost manufacturing”, “hide call centers”, “more MPC”,
+            “5 prospects”.
+          </p>
+          <label className="field-label" htmlFor="nl-suggest">
+            Your recommendation
+          </label>
+          <textarea
+            id="nl-suggest"
+            value={newsletterSuggestion}
+            onChange={(e) => setNewsletterSuggestion(e.target.value)}
+            placeholder="Boost auto suppliers. More MPC. Hide retail."
+          />
+          <button
+            className="btn btn-primary btn-block"
+            style={{ marginTop: "0.65rem" }}
+            disabled={newsletterBusy}
+            onClick={() => void submitNewsletterSuggestion()}
+          >
+            {newsletterBusy ? "Saving…" : "Apply to tomorrow’s brief"}
+          </button>
+          {newsletterApplied ? <p className="subtle">Applied: {newsletterApplied}</p> : null}
+          {!!newsletterPrefs.suggestions.length && (
+            <>
+              <h3 style={{ marginTop: "1rem" }}>Recent tweaks</h3>
+              {newsletterPrefs.suggestions.slice(0, 5).map((s) => (
+                <div key={s.at} style={{ marginTop: "0.45rem" }}>
+                  <div className="subtle">{new Date(s.at).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT</div>
+                  <div>{s.text}</div>
+                  <div className="muted">{s.applied}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       </>
     );
   } else {
@@ -1754,7 +1893,10 @@ export default function App() {
           <button className="btn btn-primary btn-lg btn-block" onClick={() => setMorePane("blitz")}>
             Team desk / Blitz
           </button>
-          <button className="btn btn-accent btn-lg btn-block" onClick={() => setMorePane("import")}>
+          <button className="btn btn-accent btn-lg btn-block" onClick={() => setMorePane("newsletter")}>
+            Morning brief / Improve email
+          </button>
+          <button className="btn btn-ghost btn-lg btn-block" onClick={() => setMorePane("import")}>
             Import CRM exports
           </button>
           <button className="btn btn-ghost btn-lg btn-block" onClick={() => setMorePane("settings")}>
