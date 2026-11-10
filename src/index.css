@@ -119,6 +119,85 @@ button.dial-pill {
   border-radius: 1.15rem 1.15rem 0 0;
   margin-top: -0.15rem;
 }
+.app-shell.has-daybar .main {
+  padding-bottom: 9.6rem;
+}
+.day-progress {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.day-progress strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+.day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+}
+.day-chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.day-chip .count {
+  color: var(--call);
+  margin-left: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.day-action-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(3.85rem + var(--safe-bottom));
+  width: min(28rem, calc(100% - 1rem));
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  z-index: 9;
+  box-shadow: none;
+}
+.day-action-bar .btn {
+  min-height: 2.85rem;
+  padding: 0.45rem 0.35rem;
+  font-size: 0.82rem;
+}
+.tab .tab-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  margin-left: 0.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--signal);
+  color: var(--signal-ink);
+  font-size: 0.62rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+.app-shell.has-daybar .capture-fab {
+  bottom: calc(8.15rem + var(--safe-bottom));
+}
 .section-head { margin: 0.15rem 0 0.85rem; }
 .section-head h1 { margin: 0; font-size: 1.55rem; line-height: 1.05; }
 .section-head p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
@@ -358,17 +437,20 @@ textarea { min-height: 6.5rem; resize: vertical; }
   color: var(--signal);
   display: grid;
   place-items: center;
-  z-index: 6;
+  z-index: 10;
   font-size: 1.35rem;
   font-weight: 700;
   border: 1px solid #2a3b32;
+  /* Keep FABs from stealing tab hits */
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 @media (min-width: 720px) {
   .fab {
     right: max(1rem, calc(50% - 25rem));
   }
-  .suggest-fab {
-    left: max(1rem, calc(50% - 25rem));
+  .day-action-bar {
+    width: min(52rem, calc(100% - 1.5rem));
   }
   .tabbar {
     width: min(52rem, 100%);
@@ -380,9 +462,9 @@ textarea { min-height: 6.5rem; resize: vertical; }
   font-size: 1.7rem;
   border-color: var(--signal);
 }
-.suggest-fab {
-  left: max(1rem, calc(50% - 13rem));
-  right: auto;
+.tabbar .tab {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .sheet-overlay {
   position: fixed;

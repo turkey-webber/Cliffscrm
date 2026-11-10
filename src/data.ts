@@ -43,6 +43,8 @@ export type Company = {
   plannerOrder?: number;
   fromContactSummary?: boolean;
   fromPlanner?: boolean;
+  /** Expeditor Hit List flag (manual) */
+  hitList?: boolean;
 };
 
 export function normalizeCompanyName(name: string): string {

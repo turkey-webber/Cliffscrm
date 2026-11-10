@@ -46,6 +46,14 @@ import {
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
 import {
+  applyCliffMoverDayPlan,
+  buildDailyReportText,
+  buildGoneQuiet,
+  buildHitList,
+  buildHotSheet,
+  buildPriority,
+} from "./tools";
+import {
   CALL_TYPES,
   Q4_GOALS,
   addDaysIso,
@@ -59,7 +67,19 @@ import {
 } from "./wrapup";
 
 type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
-type MorePane = "home" | "blitz" | "import" | "settings" | "company" | "newsletter";
+type MorePane =
+  | "home"
+  | "blitz"
+  | "blitz-assign"
+  | "import"
+  | "settings"
+  | "company"
+  | "newsletter"
+  | "hot"
+  | "gone"
+  | "hits"
+  | "priority"
+  | "daily";
 type TodayMode = "desk" | "truck";
 
 const IMPROVE_URL = (() => {
@@ -676,8 +696,13 @@ export default function App() {
   const routeStops = useMemo(() => buildRouteStops(nextList, 8), [nextList]);
   const inbox = captures.filter((c) => c.status === "inbox");
   const staleInbox = inbox.filter((c) => now - c.createdAt > 24 * 60 * 60 * 1000);
-  const dayWraps = wrapUps.filter((w) => w.createdAt === q4Day);
+  const dayWraps = wrapUps.filter((w) => w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day);
   const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
+  const q4Pending = dayWraps.filter((w) => !w.doneInQ4).length;
+  const dayLead = nextList[0] ?? null;
+  const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
+  const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
+  const showDayBar = tab === "today" && !!dayLead && !wrapDraft && !captureOpen && !scriptOpen;
 
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
@@ -748,6 +773,10 @@ export default function App() {
         c.contactName.toLowerCase().includes(q),
     );
   }, [liveCompanies, query]);
+
+  function patchCompany(id: string, patch: Partial<Company>) {
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
 
   function flash(msg: string) {
     setToast(msg);
@@ -905,7 +934,17 @@ export default function App() {
       const nxt = rebuilt.find((n) => n.company.id !== draft.companyId) || rebuilt[0];
       if (nxt) {
         setActiveId(nxt.company.id);
-        if (tab !== "more") setTab("today");
+        setTab("today");
+        setTodayMode("desk");
+        // Min-input: start the next dial when a phone is on file
+        if (nxt.company.phone) {
+          window.setTimeout(() => dial(nxt.company), 280);
+        } else {
+          flash(`Next: ${nxt.company.name} — no phone`);
+        }
+      } else if (q4Pending > 0 || nextWraps.some((w) => !w.doneInQ4 && w.resultDate === todayIso())) {
+        flash("Queue clear — finish Q4 sheet");
+        setTab("q4");
       }
     }
   }
@@ -1324,8 +1363,8 @@ export default function App() {
         <div className="section-head">
           <h1>Today</h1>
           <p>
-            Meetings first, then callbacks, then planner calls
-            {inbox.length ? ` · ${inbox.length} in capture inbox` : ""}
+            {todayMode === "desk" ? "Call the Next card — sticky bar does the rest" : "Drive the loop — maps on each stop"}
+            {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
         </div>
@@ -1337,33 +1376,64 @@ export default function App() {
             Truck
           </button>
         </div>
-        <div className="score-strip" aria-label="Daily progress">
-          <div className="score-cell">
-            <strong className="mono">{toDialCount}</strong>
-            <span>To dial</span>
-          </div>
-          <div className="score-cell">
-            <strong className="mono">{callsDone}/{OFFICE.callGoal}</strong>
-            <span>Calls</span>
-          </div>
-          <div className="score-cell">
-            <strong className="mono">{visitsDone}/{OFFICE.visitGoal}</strong>
-            <span>Visits</span>
-          </div>
+        <div className="day-progress" aria-label="Daily progress">
+          <span>
+            <strong className="mono">{toDialCount}</strong> to dial
+          </span>
+          <span className="mono">
+            {callsDone}/{OFFICE.callGoal} calls · {visitsDone}/{OFFICE.visitGoal} visits
+            {q4Pending ? ` · ${q4Pending} Q4` : ""}
+          </span>
+        </div>
+        <div className="day-chips" aria-label="Day tools">
+          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("hot"); }}>
+            Hot<span className="count">{hotCount}</span>
+          </button>
+          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("gone"); }}>
+            Quiet<span className="count">{goneCount}</span>
+          </button>
+          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("daily"); }}>
+            Report
+          </button>
+          {q4Pending > 0 ? (
+            <button type="button" className="day-chip" onClick={() => setTab("q4")}>
+              Q4<span className="count">{q4Pending}</span>
+            </button>
+          ) : null}
         </div>
         {!deskItems.length && (
           <div className="demo-banner">
-            Import Contact Summary + Sales Planner to build the ranked Next list.
-            <button
-              className="btn btn-accent btn-block"
-              style={{ marginTop: "0.65rem" }}
-              onClick={() => {
-                setTab("more");
-                setMorePane("import");
-              }}
-            >
-              Go to Import
-            </button>
+            {liveCompanies.length
+              ? "Nothing left on Today — finish Q4 or pull Hot / Gone quiet."
+              : "One tap loads Contact Summary + Sales Planner from Drop."}
+            {!liveCompanies.length ? (
+              <button
+                className="btn btn-accent btn-block btn-lg"
+                style={{ marginTop: "0.65rem" }}
+                disabled={!!importBusy}
+                onClick={() => void onSyncDrive()}
+              >
+                {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+              </button>
+            ) : (
+              <div className="row" style={{ marginTop: "0.65rem", gap: "0.45rem" }}>
+                {q4Pending > 0 ? (
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setTab("q4")}>
+                    Q4 sheet
+                  </button>
+                ) : null}
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setTab("more");
+                    setMorePane("hot");
+                  }}
+                >
+                  Hot Sheet
+                </button>
+              </div>
+            )}
           </div>
         )}
         {todayMode === "desk" && lead && (
@@ -1372,37 +1442,48 @@ export default function App() {
             <h2>{lead.company.name}</h2>
             <p>
               {lead.why}
+              {lead.company.contactName ? ` · ${lead.company.contactName}` : ""}
               {lead.company.phone ? ` · ${lead.company.phone}` : " · No phone"}
             </p>
-            <div className="row" style={{ marginTop: "0.85rem" }}>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => dial(lead.company)}>
-                Call
-              </button>
-              <button
-                className="btn btn-ghost"
-                style={{ flex: 1, color: "#eef5ef", borderColor: "#3a4a42" }}
-                onClick={() => openWrap(lead.company, "got_them")}
-              >
-                Wrap
-              </button>
-            </div>
+            <button
+              className="btn btn-ghost"
+              style={{ marginTop: "0.75rem", color: "#eef5ef", borderColor: "#3a4a42" }}
+              onClick={() => {
+                setActiveId(lead.company.id);
+                setScriptOpen(true);
+              }}
+            >
+              Scripts
+            </button>
           </div>
         )}
-        <div className="panel">
-          <p className="subtle" style={{ marginTop: 0 }}>
-            Backbone · CS {csFile ? `${bookCount} in book` : "missing"} · Planner{" "}
-            {plannerFile ? "loaded" : "missing"}
-          </p>
-          <p className="subtle">{importLog}</p>
-        </div>
+        {(csFile || plannerFile || importLog) && (
+          <div className="panel">
+            <p className="subtle" style={{ marginTop: 0 }}>
+              {csFile ? `${bookCount} in book` : "No Contact Summary"}
+              {" · "}
+              {plannerFile ? "Planner on" : "No planner"}
+            </p>
+          </div>
+        )}
         {todayMode === "desk" ? (
           <div className="panel">
-            <h2>Queue</h2>
+            <h2>Up next</h2>
             {!deskItems.length && (
-              <p className="empty">{liveCompanies.length ? "Nothing waiting" : "Import Contact Summary + Sales Planner first."}</p>
+              <p className="empty">{liveCompanies.length ? "Queue clear" : "Sync Drop to fill Today."}</p>
             )}
             {deskItems.slice(lead ? 1 : 0, 25).map((item) => (
-              <div key={item.company.id} className="list-item">
+              <button
+                key={item.company.id}
+                type="button"
+                className="list-item"
+                style={{ width: "100%", textAlign: "left" }}
+                onClick={() => {
+                  setActiveId(item.company.id);
+                  if (item.company.phone) dial(item.company);
+                  else openWrap(item.company, "got_them");
+                }}
+              >
                 <div style={{ flex: 1 }}>
                   <strong>
                     {item.motion.toUpperCase()} · {item.company.name}
@@ -1414,15 +1495,7 @@ export default function App() {
                   </div>
                   <BadgeRow c={item.company} />
                 </div>
-                <div className="stack">
-                  <button className="btn btn-primary" onClick={() => dial(item.company)}>
-                    Call
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => openWrap(item.company, "got_them")}>
-                    Wrap
-                  </button>
-                </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
@@ -1954,6 +2027,42 @@ export default function App() {
             Wrap-up
           </button>
         </div>
+        <div className="row wrap" style={{ marginBottom: "0.75rem", gap: "0.45rem" }}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              patchCompany(active.id, { hitList: !active.hitList });
+              flash(active.hitList ? "Removed from Hit List" : "Added to Hit List");
+            }}
+          >
+            {active.hitList ? "On Hit List ✓" : "Add to Hit List"}
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              const badges = active.badges.includes("jackpot")
+                ? active.badges.filter((b) => b !== "jackpot")
+                : [...active.badges, "jackpot" as const];
+              patchCompany(active.id, { badges });
+              flash(badges.includes("jackpot") ? "Jackpot flagged" : "Jackpot cleared");
+            }}
+          >
+            {active.badges.includes("jackpot") ? "Jackpot ✓" : "Flag Jackpot"}
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              patchCompany(active.id, {
+                blitzState: active.blitzState === "dnc" ? "open" : "dnc",
+                lockedBy: undefined,
+                lockUntil: undefined,
+              });
+              flash(active.blitzState === "dnc" ? "Callable again" : "Do not call");
+            }}
+          >
+            {active.blitzState === "dnc" ? "Clear DNC" : "Do not call"}
+          </button>
+        </div>
         <div className="card">
           <h2>Timeline</h2>
           {!(active.timeline || []).length && !active.notes && <p className="empty">No events yet.</p>}
@@ -2228,6 +2337,33 @@ export default function App() {
             }}
           />
         </label>
+        <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
+          CliffMover day-plan CSV
+          <input
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            disabled={!!importBusy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              void f.text().then((text) => {
+                const result = applyCliffMoverDayPlan(liveCompanies, text);
+                setCompanies(result.companies);
+                setImportLog(result.message);
+                flash(result.message);
+                if (result.imported) {
+                  setTab("today");
+                  setTodayMode("desk");
+                }
+              });
+            }}
+          />
+        </label>
+        <p className="subtle" style={{ marginTop: "0.35rem" }}>
+          Columns: company, contact, phone, address, territory, last contact, last billed, notes, date, time,
+          type — from CliffMover_Operating_Brief.
+        </p>
         <button
           className="btn btn-warn btn-block"
           style={{ marginTop: "0.55rem" }}
@@ -2307,6 +2443,223 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "hot" || morePane === "gone" || morePane === "hits" || morePane === "priority") {
+    const title =
+      morePane === "hot"
+        ? "Hot Sheet"
+        : morePane === "gone"
+          ? "Gone quiet"
+          : morePane === "hits"
+            ? "Hit List"
+            : "Priority list";
+    const blurb =
+      morePane === "hot"
+        ? "Hiring signals, jackpot, first-year, and missing clients"
+        : morePane === "gone"
+          ? "No recent talk or overdue callbacks — win them back"
+          : morePane === "hits"
+            ? "Accounts you flagged from Accounts or company cards"
+            : "Meetings and callbacks first, then Hot Sheet";
+    const rows =
+      morePane === "hot"
+        ? buildHotSheet(liveCompanies)
+        : morePane === "gone"
+          ? buildGoneQuiet(liveCompanies)
+          : morePane === "hits"
+            ? buildHitList(liveCompanies)
+            : buildPriority(liveCompanies, wrapUps);
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>{title}</h1>
+          <p>
+            {blurb} · {rows.length}
+          </p>
+        </div>
+        {!rows.length ? (
+          <div className="card">
+            <p className="empty">
+              {morePane === "hits"
+                ? "No Hit List yet — open an account and tap Add to Hit List."
+                : "Nothing here until Contact Summary / Sales Planner / research lands."}
+            </p>
+            <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
+              Go to Import
+            </button>
+          </div>
+        ) : (
+          rows.map((row) => (
+            <div key={row.company.id} className="card" style={{ marginBottom: "0.55rem" }}>
+              <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                <div>
+                  <strong>{row.company.name}</strong>
+                  <div className="subtle">
+                    {row.company.contactName || "Rep TBD"}
+                    {row.company.phone ? ` · ${row.company.phone}` : " · No phone"}
+                  </div>
+                  <div className="muted">{row.why}</div>
+                </div>
+                <BadgeRow c={row.company} />
+              </div>
+              <div className="row" style={{ marginTop: "0.65rem", gap: "0.45rem" }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setActiveId(row.company.id);
+                    dial(row.company);
+                  }}
+                >
+                  {row.action}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setActiveId(row.company.id);
+                    setMorePane("company");
+                  }}
+                >
+                  Open
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </>
+    );
+  } else if (morePane === "daily") {
+    const report = buildDailyReportText({
+      companies: liveCompanies,
+      wrapUps,
+      captures,
+      callsDone,
+      visitsDone,
+      myScore,
+    });
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Daily Report</h1>
+          <p>Email notes · Outlook next steps · Drive day sheet text</p>
+        </div>
+        <div className="card">
+          <pre className="q4-block" style={{ maxHeight: 360, overflow: "auto" }}>
+            {report}
+          </pre>
+          <button
+            className="btn btn-primary btn-block"
+            style={{ marginTop: "0.65rem" }}
+            onClick={() => void copyText(report, "Daily Report")}
+          >
+            Copy report
+          </button>
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.45rem" }}
+            onClick={() => {
+              const subject = encodeURIComponent(`CliffsCRM Daily Report · ${todayIso()}`);
+              const body = encodeURIComponent(report);
+              window.location.href = `mailto:${OFFICE.agentEmail}?subject=${subject}&body=${body}`;
+              flash("Opening email");
+            }}
+          >
+            Email to Cliff
+          </button>
+          <button className="btn btn-ghost btn-block" style={{ marginTop: "0.45rem" }} onClick={() => setTab("q4")}>
+            Open Q4 sheet
+          </button>
+        </div>
+      </>
+    );
+  } else if (morePane === "blitz-assign") {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Blitz assign</h1>
+          <p>Admin flags · shared list · no passwords</p>
+        </div>
+        <div className="card">
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Tap a company to flag Jackpot, Counts as new (first-year), Do not call, or Hit List. Full
+            multi-caller assign + Corporate South Zone countdown still need the Blitz Board Sheet link.
+          </p>
+          <button className="btn btn-primary btn-block" onClick={() => setMorePane("blitz")}>
+            Open Team desk
+          </button>
+        </div>
+        {liveCompanies.slice(0, 80).map((c) => (
+          <div key={c.id} className="card" style={{ marginBottom: "0.45rem" }}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <strong>{c.name}</strong>
+                <div className="subtle">
+                  {c.blitzState}
+                  {c.lockedBy ? ` · ${c.lockedBy}` : ""}
+                </div>
+              </div>
+              <BadgeRow c={c} />
+            </div>
+            <div className="row wrap" style={{ marginTop: "0.55rem", gap: "0.35rem" }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  const badges = c.badges.includes("jackpot")
+                    ? c.badges.filter((b) => b !== "jackpot")
+                    : [...c.badges, "jackpot" as const];
+                  patchCompany(c.id, { badges });
+                }}
+              >
+                Jackpot
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  const badges = c.badges.includes("first-year")
+                    ? c.badges.filter((b) => b !== "first-year")
+                    : [...c.badges.filter((b) => b !== "prospect"), "first-year" as const];
+                  patchCompany(c.id, { badges });
+                }}
+              >
+                Counts as new
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() =>
+                  patchCompany(c.id, {
+                    blitzState: c.blitzState === "dnc" ? "open" : "dnc",
+                    lockedBy: undefined,
+                    lockUntil: undefined,
+                  })
+                }
+              >
+                {c.blitzState === "dnc" ? "Clear DNC" : "DNC"}
+              </button>
+              <button className="btn btn-ghost" onClick={() => patchCompany(c.id, { hitList: !c.hitList })}>
+                {c.hitList ? "Hit ✓" : "Hit List"}
+              </button>
+            </div>
+          </div>
+        ))}
+        {!liveCompanies.length ? (
+          <div className="card">
+            <p className="empty">Import a book first.</p>
+            <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
+              Go to Import
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
   } else if (morePane === "newsletter") {
     main = (
       <>
@@ -2380,6 +2733,24 @@ export default function App() {
           <button className="menu-link" onClick={() => setMorePane("blitz")}>
             Team desk / Blitz <span>→</span>
           </button>
+          <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
+            Blitz assign <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("hot")}>
+            Hot Sheet <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("gone")}>
+            Gone quiet <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("priority")}>
+            Priority list <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("hits")}>
+            Hit List <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("daily")}>
+            Daily Report <span>→</span>
+          </button>
           <button className="menu-link" onClick={() => setMorePane("newsletter")}>
             Morning brief <span>→</span>
           </button>
@@ -2395,13 +2766,13 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${showDayBar ? " has-daybar" : ""}`}>
       <header className="topbar">
         <div className="brand-block">
           <p className="brand-kicker">Express · Montgomery</p>
           <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            Field desk
+            {dayLead ? `Next · ${dayLead.company.name}` : "Field desk"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
@@ -2412,6 +2783,7 @@ export default function App() {
           onClick={() => {
             setTab("today");
             setTodayMode("desk");
+            if (dayLead?.company.phone) dial(dayLead.company);
           }}
         >
           <strong className="mono">{toDialCount}</strong>
@@ -2421,28 +2793,69 @@ export default function App() {
 
       <main className="main">{main}</main>
 
+      {showDayBar && dayLead ? (
+        <div className="day-action-bar" role="toolbar" aria-label="Next call actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setActiveId(dayLead.company.id);
+              dial(dayLead.company);
+            }}
+          >
+            Call
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setActiveId(dayLead.company.id);
+              claim(dayLead.company.id);
+              pendingScore.current = { result: "voicemail", points: 0 };
+              openWrap(dayLead.company, "voicemail");
+            }}
+          >
+            VM
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setActiveId(dayLead.company.id);
+              claim(dayLead.company.id);
+              pendingScore.current = null;
+              openWrap(dayLead.company, "skip");
+            }}
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            className="btn btn-accent"
+            onClick={() => {
+              setActiveId(dayLead.company.id);
+              openWrap(dayLead.company, "got_them");
+            }}
+          >
+            Wrap
+          </button>
+        </div>
+      ) : null}
+
       <button className="fab capture-fab" aria-label="Capture" title="Capture" onClick={() => setCaptureOpen(true)}>
         +
-      </button>
-      <button
-        className="fab suggest-fab"
-        aria-label="Suggest script"
-        title="Suggest"
-        onClick={() => setScriptOpen(true)}
-      >
-        ?
       </button>
 
       <nav className="tabbar tabbar-5" aria-label="Primary">
         {(
           [
-            ["today", "Today", IconHome],
-            ["mpc", "MPC", IconMpc],
-            ["accounts", "Accounts", IconBook],
-            ["q4", "Q4", IconQ4],
-            ["more", "More", IconMore],
+            ["today", "Today", IconHome, toDialCount || inbox.length],
+            ["mpc", "MPC", IconMpc, mpc.length],
+            ["accounts", "Accounts", IconBook, 0],
+            ["q4", "Q4", IconQ4, q4Pending],
+            ["more", "More", IconMore, 0],
           ] as const
-        ).map(([id, label, Icon]) => (
+        ).map(([id, label, Icon, badge]) => (
           <button
             key={id}
             className={`tab ${tab === id ? "active" : ""}`}
@@ -2450,12 +2863,12 @@ export default function App() {
               setTab(id);
               if (id === "more") setMorePane("home");
             }}
-            aria-label={label}
+            aria-label={badge ? `${label}, ${badge}` : label}
           >
             <Icon />
-            <span>
+            <span className="tab-label">
               {label}
-              {id === "today" && inbox.length ? ` ${inbox.length}` : ""}
+              {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
             </span>
           </button>
         ))}
