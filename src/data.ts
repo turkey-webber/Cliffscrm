@@ -202,10 +202,11 @@ export const DEMO_COMPANIES: Company[] = [
 ];
 
 export function is2x(c: Company): boolean {
+  // New first-year always 2x. Missing only when last billed is known and 6+ months ago.
   if (c.badges.includes("first-year")) return true;
-  if (c.badges.includes("missing")) return true;
   if (!c.lastBilled) return false;
   const billed = new Date(c.lastBilled).getTime();
+  if (Number.isNaN(billed)) return false;
   const sixMonths = 1000 * 60 * 60 * 24 * 183;
   return Date.now() - billed >= sixMonths;
 }
