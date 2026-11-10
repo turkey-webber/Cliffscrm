@@ -22,8 +22,11 @@ export type Company = {
   territory: string;
   badges: CompanyBadge[];
   lastBilled?: string;
+  lastContacted?: string;
   research: { source: string; date: string; fact: string }[];
   notes: string;
+  /** One timeline per company — wrap-ups, captures, research */
+  timeline?: { id: string; at: string; kind: string; summary: string; detail?: string }[];
   lat?: number;
   lng?: number;
   blitzState: BlitzState;
@@ -32,7 +35,34 @@ export type Company = {
   lastResult?: CallResult;
   lastScore?: number;
   lastCaller?: string;
+  /** YYYY-MM-DD next touch from wrap-up */
+  nextTouch?: string;
+  /** Present in Contact Summary (Book of record) */
+  inBook?: boolean;
+  /** 1-based stop order from Sales Planner; undefined = not on today’s planner */
+  plannerOrder?: number;
+  fromContactSummary?: boolean;
+  fromPlanner?: boolean;
 };
+
+export function normalizeCompanyName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s*\(demo\)\s*$/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function matchCompany(book: Company[], name: string): Company | undefined {
+  const key = normalizeCompanyName(name);
+  if (!key) return undefined;
+  const exact = book.find((c) => normalizeCompanyName(c.name) === key);
+  if (exact) return exact;
+  return book.find((c) => {
+    const n = normalizeCompanyName(c.name);
+    return n.includes(key) || key.includes(n);
+  });
+}
 
 export type Points = {
   discovery: number;
@@ -47,8 +77,8 @@ export const OFFICE = {
   address: "5729 Carmichael Pkwy, Montgomery AL 36117",
   lat: 32.3593,
   lng: -86.216,
-  visitGoal: 15,
-  callGoal: 20,
+  visitGoal: 20,
+  callGoal: 40,
   agentName: "Cliff Carlisle",
   agentEmail: "Cliff.carlisle@expresspros.com",
 };
@@ -61,7 +91,11 @@ export const DEFAULT_POINTS: Points = {
   multiplier: 2,
 };
 
-/** Demo book only — sample data, no real phones invented */
+export function isDemoCompany(c: Company): boolean {
+  return /\(DEMO\)\s*$/i.test(c.name) || /^c[1-5]$/.test(c.id);
+}
+
+/** Legacy sample book — no longer loaded into the live app */
 export const DEMO_COMPANIES: Company[] = [
   {
     id: "c1",
@@ -168,10 +202,11 @@ export const DEMO_COMPANIES: Company[] = [
 ];
 
 export function is2x(c: Company): boolean {
+  // New first-year always 2x. Missing only when last billed is known and 6+ months ago.
   if (c.badges.includes("first-year")) return true;
-  if (c.badges.includes("missing")) return true;
   if (!c.lastBilled) return false;
   const billed = new Date(c.lastBilled).getTime();
+  if (Number.isNaN(billed)) return false;
   const sixMonths = 1000 * 60 * 60 * 24 * 183;
   return Date.now() - billed >= sixMonths;
 }
