@@ -23,7 +23,7 @@ import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
 import type { RecallStore } from "./import/types";
-import { buildCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
+import { buildCandidate, matchMpcToMarket, rematchCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
 import { isResumeFileName, resumeSourceLabel } from "./mpc/detect";
 import {
   clearDirectoryHandle,
@@ -859,6 +859,34 @@ export default function App() {
     [liveCompanies, mpc, newsletterPrefs],
   );
   const morningHtml = useMemo(() => newsletterHtml(morningBrief), [morningBrief]);
+
+  const selectedMpcCandidate = useMemo(
+    () => mpc.find((c) => c.id === selectedMpc) || mpc[0],
+    [mpc, selectedMpc],
+  );
+  /** Live rematch so ranking/why stay current when the book or matcher changes. */
+  const selectedLiveMatches = useMemo(
+    () =>
+      selectedMpcCandidate
+        ? matchMpcToMarket(liveCompanies, selectedMpcCandidate.resumeText, selectedMpcCandidate.trade)
+        : [],
+    [liveCompanies, selectedMpcCandidate],
+  );
+
+  useEffect(() => {
+    if (!selectedMpcCandidate) return;
+    const next = rematchCandidate(selectedMpcCandidate, liveCompanies);
+    const same =
+      next.matches.length === selectedMpcCandidate.matches.length &&
+      next.matches.every(
+        (m, i) =>
+          m.companyName === selectedMpcCandidate.matches[i]?.companyName &&
+          m.score === selectedMpcCandidate.matches[i]?.score &&
+          m.why === selectedMpcCandidate.matches[i]?.why,
+      );
+    if (same && next.trade === selectedMpcCandidate.trade) return;
+    setMpc((list) => list.map((c) => (c.id === next.id ? next : c)));
+  }, [liveCompanies, selectedMpcCandidate]);
 
   async function submitNewsletterSuggestion() {
     const suggestion = newsletterSuggestion.trim();
@@ -2188,7 +2216,7 @@ export default function App() {
       </>
     );
   } else if (tab === "mpc") {
-    const selected = mpc.find((c) => c.id === selectedMpc) || mpc[0];
+    const selected = selectedMpcCandidate;
     main = (
       <>
         <div className="section-head">
@@ -2340,12 +2368,15 @@ export default function App() {
               {selected.name} · {selected.trade}
             </h2>
             <p>
-              {selected.matches.filter((m) => m.inBook).length} in book ·{" "}
-              {selected.matches.filter((m) => !m.inBook).length} outside book
+              {selectedLiveMatches.filter((m) => m.inBook).length} in book ·{" "}
+              {selectedLiveMatches.filter((m) => !m.inBook).length} outside book
             </p>
+            <p className="subtle">Ranked by hire likelihood — currently hiring, past fills, then skill fit.</p>
             {selected.note && <p className="subtle">{selected.note}</p>}
-            {!selected.matches.length && <p className="empty">No strong matches — try a clearer trade or resume.</p>}
-            {selected.matches.map((m) => (
+            {!selectedLiveMatches.length && (
+              <p className="empty">No strong matches — try a clearer trade or resume.</p>
+            )}
+            {selectedLiveMatches.map((m) => (
               <div key={`${m.companyName}-${m.inBook}`} className="list-item" style={{ alignItems: "stretch" }}>
                 <div style={{ flex: 1 }}>
                   <strong>
@@ -2354,9 +2385,7 @@ export default function App() {
                       {m.inBook ? "In book" : "Not in book"}
                     </span>
                   </strong>
-                  <div className="muted">
-                    score {m.score} · {m.why}
-                  </div>
+                  <div className="muted">{m.why}</div>
                   <div className="muted">
                     {[m.city, m.phone].filter(Boolean).join(" · ") || "Contact research via links"}
                   </div>
@@ -2402,7 +2431,9 @@ export default function App() {
                   <strong>
                     {c.name} · {c.trade}
                   </strong>
-                  <div className="muted">{c.matches.length} matches</div>
+                  <div className="muted">
+                    {matchMpcToMarket(liveCompanies, c.resumeText, c.trade).length} matches
+                  </div>
                 </div>
               </button>
             ))}

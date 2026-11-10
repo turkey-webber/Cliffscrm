@@ -1,5 +1,5 @@
 import { matchCompany, normalizeCompanyName, type Company } from "./data";
-import { researchLinksFor, TERRITORY_PROSPECTS, type ResearchLink } from "./research";
+import { researchLinksFor, TERRITORY_PROSPECTS, type ProspectSeed, type ResearchLink } from "./research";
 
 export type MpcMatch = {
   companyName: string;
@@ -24,12 +24,12 @@ export type MpcCandidate = {
 };
 
 const TRADE_ALIASES: Record<string, string[]> = {
-  welder: ["weld", "mig", "tig", "fabricat", "steel"],
-  cnc: ["cnc", "machinist", "lathe", "mill"],
+  welder: ["weld", "mig", "tig", "fabricat", "steel", "welder", "welding"],
+  cnc: ["cnc", "machinist", "lathe", "mill", "machining"],
   driver: ["cdl", "driver", "truck", "delivery", "class a", "class b"],
   forklift: ["forklift", "reach truck", "warehouse", "material handler"],
   warehouse: ["warehouse", "picker", "packer", "selector", "inventory", "shipping", "receiving"],
-  production: ["production", "operator", "assembly", "line", "manufacturing"],
+  production: ["production", "operator", "assembly", "line", "manufacturing", "team member"],
   electrician: ["electric", "plc", "maintenance tech", "industrial electrician"],
   maintenance: ["maintenance", "mechanic", "millwright", "hvac"],
   construction: ["construction", "carpenter", "laborer", "concrete", "roof"],
@@ -37,6 +37,22 @@ const TRADE_ALIASES: Record<string, string[]> = {
   hr: ["human resource", "hr ", "recruiter", "talent"],
   quality: ["quality", "inspector", "qc", "qa"],
 };
+
+/** Rank bands — most likely to hire first. */
+const SCORE = {
+  hiringNow: 90,
+  hiredBefore: 62,
+  employsSkill: 38,
+  namedOnResume: 18,
+  activeAccount: 6,
+  missingClient: 4,
+  local: 3,
+  closingPlant: -40,
+} as const;
+
+const HIRING_RE = /\b(hir(?:e|ing|es)|recruit(?:ing|s)?|job(?:s)?|opening(?:s)?|posting(?:s)?|open role|staffing need|associates? needed|looking for)\b/i;
+const CLOSING_RE = /\b(warn|closing|closure|layoff|shutting down)\b/i;
+const PAST_FILL_RE = /\b(placed|filled|job order|temp(?:orary)?|contract|billed|used (?:us|express)|past order)\b/i;
 
 function tokensFrom(text: string): string[] {
   return text
@@ -86,83 +102,155 @@ function tradeKeys(trade: string): string[] {
       keys.add(name);
     }
   }
-  return [...keys];
+  return [...keys].filter(Boolean);
 }
 
-function scoreBookCompany(c: Company, resume: string, trade: string): { score: number; why: string } | null {
+function tradeLabel(trade: string): string {
+  const t = trade.trim().toLowerCase() || "this trade";
+  if (t === "general") return "this trade";
+  // plural-ish display for common trades
+  if (t.endsWith("s") || t === "hr" || t === "cnc") return t;
+  if (t === "quality") return "QC / inspectors";
+  return `${t}s`;
+}
+
+function hayHasTrade(hay: string, keys: string[]): string[] {
+  return keys.filter((k) => k.length > 2 && hay.includes(k));
+}
+
+function clipFact(fact: string, max = 72): string {
+  const clean = fact.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1).trim()}…`;
+}
+
+function bookHaystack(c: Company): string {
+  return [
+    c.name,
+    c.contactTitle,
+    c.notes,
+    c.badges.join(" "),
+    c.research.map((r) => `${r.source} ${r.fact}`).join(" "),
+    (c.timeline || []).map((t) => `${t.summary} ${t.detail || ""}`).join(" "),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+type Scored = { score: number; why: string };
+
+function scoreBookCompany(c: Company, resume: string, trade: string): Scored | null {
   const blob = resume.toLowerCase();
   const name = normalizeCompanyName(c.name);
+  const keys = tradeKeys(trade);
+  const hay = bookHaystack(c);
+  const hits = hayHasTrade(hay, keys);
+  const skillOnResume = keys.some((k) => blob.includes(k));
+  const label = tradeLabel(trade);
+
+  const hiringFacts = c.research.filter((r) => HIRING_RE.test(r.fact) || HIRING_RE.test(r.source));
+  const hiringWithTrade = hiringFacts.find((r) => hayHasTrade(`${r.fact} ${r.source}`.toLowerCase(), keys).length > 0);
+  const anyHiring = hiringFacts[0];
+  const closing = CLOSING_RE.test(hay);
+  const pastFill =
+    PAST_FILL_RE.test(hay) ||
+    (c.timeline || []).some((t) => /job_order|order|placed|billed/i.test(`${t.kind} ${t.summary}`));
+
   let score = 0;
-  const reasons: string[] = [];
+  let why = "";
+
+  // 1) Currently hiring something similar
+  if (hiringWithTrade || (anyHiring && hits.length && skillOnResume)) {
+    const fact = hiringWithTrade?.fact || anyHiring?.fact || "";
+    score = SCORE.hiringNow + Math.min(8, hits.length * 2);
+    why = fact
+      ? `Hiring ${label} now — ${clipFact(fact)}`
+      : `Hiring signal on file for ${label}`;
+  }
+  // 2) Previously hired / billed for this kind of role
+  else if ((c.lastBilled || pastFill) && (hits.length || skillOnResume)) {
+    score = SCORE.hiredBefore + Math.min(10, hits.length * 3);
+    if (c.lastBilled && hits.length) {
+      why = `Previously billed here — they use ${label}`;
+    } else if (c.lastBilled) {
+      why = `Past billed client — good chance they need ${label}`;
+    } else {
+      why = `Prior fill / job-order history for ${label}`;
+    }
+  }
+  // 3) Employs people with this skill set
+  else if (hits.length >= 1) {
+    score = SCORE.employsSkill + Math.min(12, hits.length * 3);
+    why = `Employs ${label} (${hits.slice(0, 2).join(", ")})`;
+  } else {
+    return null;
+  }
 
   if (name && blob.includes(name)) {
-    score += 40;
-    reasons.push("named on resume");
+    score += SCORE.namedOnResume;
+    if (!why.toLowerCase().includes("resume")) {
+      why = `${why.replace(/\.$/, "")} · named on resume`;
+    }
   }
-
-  const keys = tradeKeys(trade);
-  const hay = `${c.name} ${c.contactTitle} ${c.notes} ${c.research.map((r) => r.fact).join(" ")} ${c.badges.join(" ")}`.toLowerCase();
-  const hits = keys.filter((k) => hay.includes(k) || blob.includes(k));
-  if (hits.length) {
-    score += Math.min(28, hits.length * 6);
-    reasons.push(`trade fit (${hits.slice(0, 3).join(", ")})`);
-  }
-
-  if (c.lastBilled) {
-    score += 12;
-    reasons.push("past billed client");
-  }
-  if (c.badges.includes("missing")) {
-    score += 8;
-    reasons.push("missing client");
-  }
-  if (c.badges.includes("active") || c.badges.includes("first-year")) {
-    score += 6;
-    reasons.push("active account");
-  }
-  if (c.research.some((r) => /hir|job|open|post/i.test(r.fact))) {
-    score += 10;
-    reasons.push("hiring signal on file");
-  }
+  if (c.badges.includes("active") || c.badges.includes("first-year")) score += SCORE.activeAccount;
+  if (c.badges.includes("missing")) score += SCORE.missingClient;
   if (/\b(montgomery|prattville|wetumpka|hope hull|tallassee|selma|clanton|troy)\b/i.test(c.city) || !c.city) {
-    score += 4;
+    score += SCORE.local;
+  }
+  if (closing) {
+    score += SCORE.closingPlant;
+    why = `Plant wind-down on file — weak hire odds · ${why}`;
   }
 
-  if (score < 14) return null;
-  return { score, why: reasons.join(" · ") || "possible fit" };
+  if (score < 28) return null;
+  return { score, why };
 }
 
-function scoreProspect(
-  p: (typeof TERRITORY_PROSPECTS)[number],
-  resume: string,
-  trade: string,
-): { score: number; why: string } | null {
+function scoreProspect(p: ProspectSeed, resume: string, trade: string): Scored | null {
   const blob = resume.toLowerCase();
   const name = normalizeCompanyName(p.name);
-  let score = 0;
-  const reasons: string[] = [];
-  if (name && blob.includes(name)) {
-    score += 35;
-    reasons.push("named on resume");
-  }
   const keys = tradeKeys(trade);
+  const label = tradeLabel(trade);
+  const factLower = p.fact.toLowerCase();
   const industryHits = p.industries.filter((i) => keys.some((k) => i.includes(k) || k.includes(i)));
-  const kwHits = p.keywords.filter((k) => blob.includes(k) || keys.some((t) => t.includes(k) || k.includes(t)));
-  if (industryHits.length) {
-    score += 14;
-    reasons.push(`industry: ${industryHits.slice(0, 2).join(", ")}`);
+  const kwHits = p.keywords.filter((k) => keys.some((t) => t.includes(k) || k.includes(t)) || blob.includes(k));
+  const tradeInFact = keys.some((k) => factLower.includes(k));
+  const hiringFact = HIRING_RE.test(p.fact) || /\bjobs?\b|\brecruit/i.test(p.fact);
+  const closing = CLOSING_RE.test(p.fact);
+  const skillFit = industryHits.length > 0 || kwHits.length > 0 || tradeInFact;
+
+  if (!skillFit && !(name && blob.includes(name))) return null;
+
+  let score = 0;
+  let why = "";
+
+  // Currently hiring similar (territory fact + trade overlap)
+  if (hiringFact && (tradeInFact || kwHits.length || industryHits.length)) {
+    score = SCORE.hiringNow + Math.min(8, kwHits.length * 2 + (tradeInFact ? 4 : 0));
+    why = tradeInFact || kwHits.some((k) => /weld|cnc|cdl|forklift|operator|warehouse|production/.test(k))
+      ? `Hiring ${label} — ${clipFact(p.fact)}`
+      : `Hiring now — ${clipFact(p.fact)}`;
   }
-  if (kwHits.length) {
-    score += Math.min(30, kwHits.length * 7);
-    reasons.push(`skills: ${kwHits.slice(0, 3).join(", ")}`);
+  // Employs this skill set (industry / keyword pack)
+  else if (skillFit) {
+    score = SCORE.employsSkill + Math.min(14, kwHits.length * 3 + industryHits.length * 2);
+    const skillBit = kwHits[0] || industryHits[0] || trade;
+    why = `Employs ${label} (${skillBit}) · ${clipFact(p.fact, 48)}`;
+  } else {
+    return null;
   }
-  if (keys.some((k) => p.fact.toLowerCase().includes(k))) {
-    score += 8;
-    reasons.push("expansion / hiring fact");
+
+  if (name && blob.includes(name)) {
+    score += SCORE.namedOnResume;
+    why = `${why} · named on resume`;
   }
-  if (score < 16) return null;
-  reasons.push(p.fact);
-  return { score, why: reasons.join(" · ") };
+  if (closing) {
+    score += SCORE.closingPlant;
+    why = `Closing / WARN on file — weak hire odds`;
+  }
+
+  if (score < 30) return null;
+  return { score, why };
 }
 
 export function matchMpcToMarket(
@@ -206,7 +294,18 @@ export function matchMpcToMarket(
     });
   }
 
-  return [...inBook, ...external].sort((a, b) => b.score - a.score || a.companyName.localeCompare(b.companyName)).slice(0, 20);
+  return [...inBook, ...external]
+    .sort((a, b) => b.score - a.score || a.companyName.localeCompare(b.companyName))
+    .slice(0, 20);
+}
+
+/** Refresh matches against the current book (for candidates saved before ranking changes). */
+export function rematchCandidate(candidate: MpcCandidate, book: Company[]): MpcCandidate {
+  return {
+    ...candidate,
+    trade: inferTrade(candidate.resumeText, candidate.trade),
+    matches: matchMpcToMarket(book, candidate.resumeText, candidate.trade),
+  };
 }
 
 export function newMpcId(): string {
