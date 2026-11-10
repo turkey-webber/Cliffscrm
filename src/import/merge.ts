@@ -42,14 +42,37 @@ function badgesFromRow(headers: string[], row: string[]): CompanyBadge[] {
   return badges;
 }
 
+function parseContactsBlob(blob: string): { contactName: string; contactTitle: string; phone: string } {
+  // cliffs-crm-companies: "Jason Hamond; General Manager; (334) 264-7336; email"
+  const parts = blob
+    .split("|")[0]
+    .split(";")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const contactName = parts[0] || "";
+  const contactTitle = parts[1] || "";
+  const phonePart = parts.find((p) => /\(?\d{3}\)?/.test(p)) || "";
+  return { contactName, contactTitle, phone: phonePart };
+}
+
+function parseSiteCity(site: string): { address: string; city: string } {
+  // "3013 Hayneville Rd Montgomery" → address + city guess
+  const m = site.match(/^(.*)\s+(Montgomery|Prattville|Wetumpka|Tallassee|Millbrook|Hope Hull|Chapman|Elmore|Maplesville|Greeley|Clanton|Troy|Tuskegee|Selma)\s*$/i);
+  if (m) return { address: m[1].trim(), city: m[2] };
+  return { address: site, city: "" };
+}
+
 function companiesFromContactSummary(table: ParsedTable, fileName: string): { companies: Company[]; skipped: number } {
   if (!table.headers.length) return { companies: [], skipped: 0 };
   const companies: Company[] = [];
   let skipped = 0;
+  const headerBlob = table.headers.join(" ").toLowerCase();
+  const isTerritoryLeads = /hiring signal|call reason|talking point|in system/.test(headerBlob);
+
   for (const row of table.rows) {
     const name = col(table.headers, row, [
-      "company",
       "company name",
+      "company",
       "client name",
       "account",
       "account name",
@@ -57,18 +80,117 @@ function companiesFromContactSummary(table: ParsedTable, fileName: string): { co
       "business",
       "customer",
     ]);
-    if (!name || /^(company|name|account)$/i.test(name)) {
+    if (!name || /^(company|name|account|company name)$/i.test(name)) {
       skipped++;
       continue;
     }
-    const phone = col(table.headers, row, ["phone", "main phone", "telephone", "mobile", "primary phone"]);
-    const city = col(table.headers, row, ["city", "town"]);
-    const address = col(table.headers, row, ["address", "street", "addr", "address 1"]);
-    const contactName = col(table.headers, row, ["contact", "contact name", "rep", "decision maker", "primary contact"]);
-    const contactTitle = col(table.headers, row, ["title", "contact title", "job title"]);
-    const territory = col(table.headers, row, ["territory", "terr", "zone", "area"]) || "";
-    const lastBilled = col(table.headers, row, ["last billed", "lastbilled", "last bill", "last activity"]);
-    const notes = col(table.headers, row, ["notes", "note", "comments"]);
+
+    let phone = col(table.headers, row, [
+      "company phone",
+      "phone",
+      "main phone",
+      "telephone",
+      "mobile",
+      "primary phone",
+      "hq phone",
+    ]);
+    let city = col(table.headers, row, ["city", "town"]);
+    let address = col(table.headers, row, [
+      "site address",
+      "address",
+      "street",
+      "addr",
+      "address 1",
+    ]);
+    let contactName = col(table.headers, row, [
+      "company rep name",
+      "decision maker name",
+      "contact",
+      "contact name",
+      "rep",
+      "decision maker",
+      "primary contact",
+    ]);
+    let contactTitle = col(table.headers, row, [
+      "company rep title",
+      "title",
+      "contact title",
+      "job title",
+    ]);
+    const territory = col(table.headers, row, ["territory", "terr", "zone", "area", "county"]) || "";
+    const lastBilled = col(table.headers, row, [
+      "date last billed",
+      "date last bill",
+      "last billed",
+      "lastbilled",
+      "last bill",
+      "last activity",
+    ]);
+    const lastContacted = col(table.headers, row, [
+      "last contacted",
+      "date last contacted",
+      "last contact",
+    ]);
+    const nextTouch = col(table.headers, row, ["next scheduled", "scheduled date", "scheduled date/time"]);
+    const notes =
+      col(table.headers, row, [
+        "notes (sales planner goals)",
+        "talking point / ask",
+        "call reason",
+        "hiring signal + date",
+        "notes",
+        "note",
+        "comments",
+        "goals",
+      ]) || "";
+
+    const contactsBlob = col(table.headers, row, ["contacts (name", "contacts"]);
+    if (contactsBlob && (!contactName || !phone)) {
+      const parsed = parseContactsBlob(contactsBlob);
+      contactName = contactName || parsed.contactName;
+      contactTitle = contactTitle || parsed.contactTitle;
+      phone = phone || parsed.phone;
+    }
+    if (!city && address) {
+      const site = parseSiteCity(address);
+      address = site.address || address;
+      city = site.city;
+    }
+    if (!city) city = col(table.headers, row, ["city"]) || "";
+
+    const research: Company["research"] = [];
+    if (isTerritoryLeads) {
+      const fact = [
+        col(table.headers, row, ["hiring signal + date", "hiring signal"]),
+        col(table.headers, row, ["talking point / ask", "talking point"]),
+        col(table.headers, row, ["call reason"]),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const source = col(table.headers, row, ["sources", "source"]) || fileName;
+      if (fact) {
+        research.push({
+          source: source.split(";")[0].trim().slice(0, 120),
+          date: new Date().toISOString().slice(0, 10),
+          fact: fact.slice(0, 500),
+        });
+      }
+    }
+
+    const openContact = col(table.headers, row, ["open contact"]).toLowerCase();
+    const badges = badgesFromRow(table.headers, row);
+    if (/^(y|yes|true|1|open)$/i.test(openContact) && !badges.includes("missing")) {
+      badges.push("missing");
+    }
+    const inSystem = col(table.headers, row, ["in system"]).toLowerCase();
+    if (inSystem === "new" && !badges.includes("prospect")) {
+      // Territory NEW leads stay prospects unless already in book badges
+      if (!badges.includes("first-year") && !badges.includes("missing") && !badges.includes("active")) {
+        badges.length = 0;
+        badges.push("prospect");
+      }
+    }
+
     companies.push({
       id: slugId(name),
       name,
@@ -78,13 +200,15 @@ function companiesFromContactSummary(table: ParsedTable, fileName: string): { co
       contactName,
       contactTitle,
       territory,
-      badges: badgesFromRow(table.headers, row),
+      badges: badges.length ? badges : (["prospect"] as CompanyBadge[]),
       lastBilled: lastBilled || undefined,
-      research: [],
-      notes: notes || `Contact Summary · ${fileName}`,
+      lastContacted: lastContacted || undefined,
+      nextTouch: nextTouch || undefined,
+      research,
+      notes: notes || `Import · ${fileName}`,
       blitzState: "open",
       inBook: true,
-      fromContactSummary: true,
+      fromContactSummary: !isTerritoryLeads,
     });
   }
   return { companies, skipped };
@@ -166,6 +290,29 @@ function companiesFromPlannerText(text: string, fileName: string): Company[] {
     });
   }
   return companies;
+}
+
+/** Expeditor Inbox / research CSV: Company Name + Notes (+ optional Source). */
+function factsFromInboxTable(table: ParsedTable, fileName: string, role: ImportRole): RecallFact[] {
+  if (!table.headers.length) return [];
+  const facts: RecallFact[] = [];
+  const date = new Date().toISOString().slice(0, 10);
+  for (const row of table.rows) {
+    const companyHint = col(table.headers, row, ["company name", "company", "account"]);
+    const fact = col(table.headers, row, ["notes", "fact", "note", "comments", "hiring signal"]);
+    const source = col(table.headers, row, ["source", "sources"]) || fileName;
+    const checked = col(table.headers, row, ["date checked", "scheduled date", "scheduled date/time"]) || date;
+    if (!companyHint || !fact || fact.length < 8) continue;
+    facts.push({
+      id: `fact-${Math.random().toString(36).slice(2, 9)}`,
+      companyHint,
+      fact: fact.slice(0, 500),
+      source: source.split(";")[0].trim().slice(0, 160),
+      date: checked.slice(0, 10),
+      role,
+    });
+  }
+  return facts;
 }
 
 function factsFromText(text: string, fileName: string, role: ImportRole): RecallFact[] {
@@ -351,11 +498,13 @@ export function ingestParsed(
     book = applyPlannerToBook(book, stops);
   }
 
-  // 3) Secondary files → recall only
+  // 3) Secondary files → recall facts (inbox rows preferred when structured)
   for (const role of ["blitz_research", "script_library", "expeditor_inbox", "other"] as ImportRole[]) {
     const item = byRole.get(role);
     if (!item) continue;
-    if (item.table.text) facts.push(...factsFromText(item.table.text, item.meta.name, role));
+    const structured = factsFromInboxTable(item.table, item.meta.name, role);
+    if (structured.length) facts.push(...structured);
+    else if (item.table.text) facts.push(...factsFromText(item.table.text, item.meta.name, role));
   }
 
   const merged = applyFacts(book, [...existingFacts, ...facts]);

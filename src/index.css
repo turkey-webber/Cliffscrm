@@ -236,6 +236,13 @@ h1, h2, h3, .serif {
   font-weight: 500;
   line-height: 1;
 }
+.suggest-fab {
+  left: max(1rem, calc(50% - 13rem));
+  right: auto;
+  background: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 600;
+}
 .sheet-overlay {
   position: fixed;
   inset: 0;

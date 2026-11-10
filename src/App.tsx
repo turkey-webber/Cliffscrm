@@ -26,7 +26,7 @@ import {
   wrapUpCardCopy,
 } from "./q4";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
-import { OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
 import {
   CALL_TYPES,
   Q4_GOALS,
@@ -127,7 +127,7 @@ function BadgeRow({ c }: { c: Company }) {
   return (
     <div className="row wrap" style={{ marginTop: "0.55rem" }}>
       {c.badges.includes("first-year") && <span className="chip chip-first">New first-year</span>}
-      {c.badges.includes("missing") && <span className="chip chip-missing">Missing</span>}
+      {c.badges.includes("missing") && <span className="chip chip-missing">Missing client</span>}
       {c.badges.includes("prospect") && <span className="chip">Prospect</span>}
       {c.badges.includes("active") && <span className="chip">Active</span>}
       {c.badges.includes("jackpot") && <span className="chip chip-jackpot">Jackpot</span>}
@@ -135,6 +135,29 @@ function BadgeRow({ c }: { c: Company }) {
       {c.nextTouch && <span className="chip">Next {c.nextTouch}</span>}
     </div>
   );
+}
+
+function StateChip({ c, now }: { c: Company; now: number }) {
+  if (c.blitzState === "locked") {
+    const left = Math.max(0, (c.lockUntil || 0) - now);
+    const m = Math.floor(left / 60000);
+    const s = Math.floor((left % 60000) / 1000);
+    return (
+      <span className="chip chip-locked">
+        Being called by {c.lockedBy || "teammate"} · {m}:{s.toString().padStart(2, "0")}
+      </span>
+    );
+  }
+  if (c.blitzState === "called") {
+    return (
+      <span className="chip chip-called">
+        Called{c.lastScore ? ` +${c.lastScore} ${resultLabel(c.lastResult!)}` : ""}
+        {c.lastCaller ? ` · ${c.lastCaller}` : ""}
+      </span>
+    );
+  }
+  if (c.blitzState === "dnc") return <span className="chip chip-dnc">Do not call</span>;
+  return <span className="chip chip-open">Open</span>;
 }
 
 function GoalGrid({
@@ -977,7 +1000,9 @@ export default function App() {
           <div className="card">
             <h2>Next</h2>
             <p>Meetings first, then callbacks, then planner calls — one shared list.</p>
-            {!deskItems.length && <p className="empty">Nothing ranked for today yet.</p>}
+            {!deskItems.length && (
+              <p className="empty">{liveCompanies.length ? "Nothing waiting" : "Import Contact Summary + Sales Planner first."}</p>
+            )}
             {deskItems.slice(0, 25).map((item) => (
               <div key={item.company.id} className="list-item">
                 <div style={{ flex: 1 }}>
@@ -1460,6 +1485,17 @@ export default function App() {
           <h1>Team desk</h1>
           <p>Blitz scoring · wrap-up still required after a result</p>
         </div>
+        <div className="card">
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Shared list colors
+          </p>
+          <div className="row wrap">
+            <span className="chip chip-open">Open</span>
+            <span className="chip chip-locked">Yellow = being called (10 min)</span>
+            <span className="chip chip-called">Gray = called + score</span>
+            <span className="chip chip-dnc">Red = do not call</span>
+          </div>
+        </div>
         <div className="score-strip">
           <div className="score-cell">
             <strong>{myScore}</strong>
@@ -1475,13 +1511,41 @@ export default function App() {
           </div>
         </div>
         <div className="card">
+          <div style={{ marginBottom: "0.45rem" }}>
+            <StateChip c={active} now={now} />
+          </div>
           <h2>{active.name}</h2>
           <p>
-            {active.city} · {active.phone || "No phone"}
+            {active.contactName || "Rep TBD"}
+            {active.contactTitle ? ` · ${active.contactTitle}` : ""}
           </p>
-          <button className="btn btn-primary btn-block btn-lg" onClick={() => dial(active)}>
+          <p>
+            {active.city || "City TBD"} · {active.phone || "No phone"}
+          </p>
+          <BadgeRow c={active} />
+          <button className="btn btn-primary btn-block btn-lg" style={{ marginTop: "0.75rem" }} onClick={() => dial(active)}>
             Call
           </button>
+        </div>
+        <div className="card">
+          <h2>Research</h2>
+          {!active.research.length && <p className="empty">No research yet</p>}
+          {active.research.map((r, i) => (
+            <div key={`${r.source}-${i}`} style={{ marginTop: i ? "0.55rem" : 0 }}>
+              <div>{r.fact}</div>
+              <div className="subtle">
+                {r.source}
+                {r.date ? ` · ${r.date}` : ""}
+              </div>
+            </div>
+          ))}
+          <div className="row wrap" style={{ marginTop: "0.65rem" }}>
+            {researchLinksFor(active.name).slice(0, 4).map((l) => (
+              <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                {l.label}
+              </a>
+            ))}
+          </div>
         </div>
         {scriptOn ? (
           <div className="card script-card">
@@ -1492,6 +1556,9 @@ export default function App() {
               </button>
             </div>
             <p>{scriptIdx === 0 ? openerFor(active) : WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].body}</p>
+            <p className="subtle" style={{ marginTop: "0.55rem" }}>
+              Front desk: {FRONT_DESK_LINE}
+            </p>
             <button className="btn btn-ghost" onClick={() => setScriptIdx((i) => i + 1)}>
               Next script card
             </button>
@@ -1510,9 +1577,16 @@ export default function App() {
         )}
         <div className="card">
           <h2>Result → wrap-up</h2>
+          <p className="subtle">Points hit instantly · 10s undo · wrap-up still required</p>
           <div className="grid-2" style={{ marginTop: "0.75rem" }}>
             <button className="btn btn-primary btn-lg" onClick={() => applyResult("appointment")}>
-              Got them
+              Appointment
+            </button>
+            <button className="btn btn-accent btn-lg" onClick={() => applyResult("job_order")}>
+              Job order{is2x(active) ? " (2x)" : ""}
+            </button>
+            <button className="btn btn-ghost btn-lg" onClick={() => applyResult("discovery")}>
+              Discovery done
             </button>
             <button className="btn btn-ghost btn-lg" onClick={() => applyResult("voicemail")}>
               Voicemail
@@ -1538,6 +1612,20 @@ export default function App() {
             </button>
           </div>
         )}
+        <button
+          className="fab suggest-fab"
+          aria-label="Suggest"
+          title="Suggest an idea / Report a problem"
+          onClick={() => {
+            const body = encodeURIComponent(
+              `Suggest an idea / Report a problem\n\nFrom: ${CALLER}\nScreen: Team desk / Blitz\nCompany: ${active.name}\n\nIdea or problem:\n`,
+            );
+            window.location.href = `mailto:${OFFICE.agentEmail}?subject=${encodeURIComponent("CliffsCRM Blitz suggestion")}&body=${body}`;
+            flash("Opening email to Cliff");
+          }}
+        >
+          ?
+        </button>
       </>
     );
   } else if (morePane === "import") {
@@ -1555,7 +1643,7 @@ export default function App() {
           <p>Contact Summary = book · Sales Planner = Today queue</p>
         </div>
         <button className="btn btn-primary btn-block btn-lg" disabled={!!importBusy} onClick={() => void onSyncDrive()}>
-          {importBusy === "drive" ? "Syncing…" : "Sync Grok Drop (Drive)"}
+          {importBusy === "drive" ? "Syncing…" : "Sync CliffMover / Grok Drop"}
         </button>
         <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
           {importBusy === "manual" ? "Importing…" : "Pick files from Drop"}

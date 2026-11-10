@@ -1,18 +1,21 @@
 import type { Company } from "./data";
 
-/** Openers sourced from Call form replies + Express Manual / Weinberg decks. */
+/**
+ * Openers from Call form replies + “How to Write an Express Call Opening”.
+ * Evaluation Hire = 520 hours (Cliff confirmed; some decks still say 720).
+ */
 export function openerFor(c: Company, agentFirst = "Cliff"): string {
   const who = c.contactName ? c.contactName.split(" ")[0] : "there";
   if (c.badges.includes("missing")) {
-    return `Hey ${who}, it's ${agentFirst} with Express Employment Professionals in Montgomery. Why are we currently not doing business with your company? What could we do to improve? We have a great associate who would fit in your organization — will you look at their résumé? Can I stop by?`;
+    return `Hey ${who}, it's ${agentFirst} with Express Employment Professionals, the locally owned office in Montgomery. You've worked with our associates before, so I'd like to ask: why are we currently not doing business with your company, and what could we do to improve? We have a great associate who would fit in your organization. Will you look at their résumé? Can I come by and meet you?`;
   }
   if (c.badges.includes("first-year") || c.badges.includes("active")) {
-    return `Hey ${who}, ${agentFirst} with Express in Montgomery. Thank you for treating our associates so well. I'd like to set a short business review to hear what you're forecasting and whether another department or service line could use us.`;
+    return `Hey ${who}, ${agentFirst} with Express. I'd like to come by in person and make sure what you expect from our associates is what we're delivering. What does the next quarter look like for you, and when is your busiest time of year? Would later this week work for a short visit?`;
   }
   if (c.badges.includes("jackpot") || c.badges.includes("prospect")) {
-    return `Hey ${who}, it's ${agentFirst} with Express Employment Professionals, the locally owned Montgomery office. What proves to be your company's biggest staffing challenge right now? Can I come to your facility and meet you?`;
+    return `Hey ${who}, this is ${agentFirst} with Express Employment Professionals, the locally owned office in Montgomery. When hiring ramps up quickly, teams typically feel pressure with onboarding and retention. How is your team handling that right now? Can I come to your facility and meet you?`;
   }
-  return `Hey ${who}, this is ${agentFirst} with Express Employment Professionals in Montgomery. Can I come to your facility and meet you? Can I bring along one of my recruiters to see the type of role you're needing?`;
+  return `Hey ${who}, this is ${agentFirst} with Express Employment Professionals, the locally owned Montgomery office. Can I come to your facility and meet you? Can I bring along one of my recruiters to see the type of role you're needing?`;
 }
 
 export const OBJECTION_LINES: { id: string; label: string; reply: string }[] = [
@@ -20,31 +23,29 @@ export const OBJECTION_LINES: { id: string; label: string; reply: string }[] = [
     id: "have-staffing",
     label: "Already have a staffing company",
     reply:
-      "I'm not asking you to abandon that relationship. What makes them successful for you? What's your most difficult skill set to secure? Where do you see Express providing you the most value?",
+      "I see where we might be able to complement what you're currently doing. Where do you see Express providing you the most value?",
   },
   {
     id: "not-hiring",
     label: "Not hiring",
-    reply:
-      "Is that your standard situation or just your current situation? When is your busy season? If it's a freeze: is it across the board or for certain positions, and how long do you expect it to last?",
+    reply: "When is your busy season for production?",
   },
   {
     id: "burned",
     label: "Burned before",
     reply:
-      "I'm sorry to hear that. Tell me more. What happened, and how could it have been better? So the problem was mainly [their words]? Let me explain how Express handles that.",
+      "Can you explain your experience and what made it negative? How could we make your experience different?",
   },
   {
     id: "internal",
     label: "Hire internally",
-    reply:
-      "Great! What is that process? Most of my clients have their own process and still find it beneficial to work with me. What happens when a special project needs skills your team doesn't have?",
+    reply: "How much time do you spend going through applications and interviews?",
   },
   {
     id: "price",
     label: "Price",
     reply:
-      "What specific rates are you concerned about — hourly bill rate or overall cost? Our pricing is all inclusive: wages, payroll taxes, benefits, unemployment, workers' comp, plus recruiting and onboarding time. We don't have a standard mark-up; we price by the job, the skills, and local conditions.",
+      "Will you share more about why you think the pricing is too high? Our rate replaces HR time, onboarding, payroll taxes, benefits, unemployment, and workers' comp risk — we price by the job, the skills, and local conditions.",
   },
   {
     id: "check-team",
@@ -54,33 +55,40 @@ export const OBJECTION_LINES: { id: string; label: string; reply: string }[] = [
   },
 ];
 
+export const FRONT_DESK_LINE =
+  "How would a guy like me get to talk to a decision-maker?";
+
 export const WEINBERG_CARDS = [
   {
     title: "Weinberg — Purpose",
     body: "State who you are, why you're calling, and ask for a short appointment. Goal of every call is the appointment — not just an order.",
   },
   {
-    title: "Challenge opener",
-    body: "What proves to be your company's biggest staffing challenge right now? Listen. Then: Can I come to your facility and meet you?",
+    title: "Relevant · Relatable · Results",
+    body: "Why now (trigger) → pressure they feel → ask their biggest challenge → then: Can I come to your facility and meet you?",
   },
   {
     title: "Missing client",
-    body: "Why are we currently not doing business with your company? What could we do to improve? Offer an MPC: We have a great associate who would fit — will you look at their résumé?",
+    body: "Ask why we're not doing business and what would improve. Offer an MPC résumé. Ask to stop by. Never invent a name, phone, or pay.",
+  },
+  {
+    title: "Active / first-year",
+    body: "Face-to-face care: make sure associates deliver what they expect. Ask next-quarter forecast and peak season. Grow toward Total Client Care.",
   },
   {
     title: "Discovery — HR challenges",
-    body: "What are your top three human resource challenges? Which positions have unusually high turnover? What's changed in your business over the last 6–12 months?",
+    body: "What are your top three human resource challenges? Which positions have unusually high turnover? What's changed in the last 6–12 months?",
   },
   {
     title: "Discovery — fill path",
-    body: "When you are hiring, what usually slows things down? If you received a surge in orders, how would you fill those? What do you do when you can't find qualified people?",
+    body: "How many associates? Temporary, Evaluation Hire (520 hours), or Direct Hire? Skills? Peak seasons? Who decides? Only partner or one of several?",
   },
   {
-    title: "Close — tour",
-    body: "When can we arrange for a facility tour? Is there a question I haven't asked that I should ask? If no appointment: Would you be open to a call when we have interviewed a strong candidate with those skills?",
+    title: "Front desk",
+    body: FRONT_DESK_LINE + " Be friendly, use their name, recognize if they're busy.",
   },
   {
     title: "Express — Local proof",
-    body: "Locally owned Montgomery office. Say associates, never temps. Evaluation Hire is 520 hours. Professional Staffing is direct hire only. Never say \"just checking in.\"",
+    body: "Locally owned Montgomery office. Say associates, never temps. Never say “just checking in” or “I was just in the area.” Professional Staffing = direct hire only.",
   },
 ];

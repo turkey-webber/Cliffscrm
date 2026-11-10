@@ -67,11 +67,16 @@ async function driveFetch(path: string, token: string, init?: RequestInit) {
 async function resolveFolderId(token: string): Promise<string | null> {
   const configuredId = process.env.GOOGLE_DROP_FOLDER_ID;
   if (configuredId) return configuredId;
-  const q = encodeURIComponent(`mimeType='${FOLDER_MIME}' and name='Grok Drop' and trashed=false`);
-  const res = await driveFetch(`/files?q=${q}&fields=files(id,name)&pageSize=5`, token);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { files?: DriveFile[] };
-  return data.files?.[0]?.id ?? null;
+  // Prefer CliffMover Drop (live Q4 exports), then Grok Drop, then the Work Export handoff folder.
+  const names = ["CliffMover Drop", "Grok Drop", "Cliff Carlisle - Work Export (Nov 2026)"];
+  for (const name of names) {
+    const q = encodeURIComponent(`mimeType='${FOLDER_MIME}' and name='${name.replace(/'/g, "\\'")}' and trashed=false`);
+    const res = await driveFetch(`/files?q=${q}&fields=files(id,name)&pageSize=5`, token);
+    if (!res.ok) continue;
+    const data = (await res.json()) as { files?: DriveFile[] };
+    if (data.files?.[0]?.id) return data.files[0].id;
+  }
+  return null;
 }
 
 async function listFolder(token: string, folderId: string): Promise<DriveFile[]> {
@@ -88,6 +93,61 @@ async function listFolder(token: string, folderId: string): Promise<DriveFile[]>
     pageToken = data.nextPageToken || "";
   } while (pageToken);
   return out;
+}
+
+/** Walk Drop + nested subfolders (Work Export uploads land in Call Lists / CRM Research / Leads / etc.). */
+async function listFolderTree(token: string, rootId: string, maxFolders = 40): Promise<DriveFile[]> {
+  const seenFolders = new Set<string>();
+  const queue = [rootId];
+  const files: DriveFile[] = [];
+  while (queue.length && seenFolders.size < maxFolders) {
+    const folderId = queue.shift()!;
+    if (seenFolders.has(folderId)) continue;
+    seenFolders.add(folderId);
+    const listed = await listFolder(token, folderId);
+    for (const f of listed) {
+      if (f.mimeType === FOLDER_MIME) {
+        // Skip giant Training PPTX trees and FastFinder copies — keep CRM data folders.
+        if (/training|fastfinder|screenshots/i.test(f.name)) continue;
+        queue.push(f.id);
+      } else {
+        files.push(f);
+      }
+    }
+  }
+  return files;
+}
+
+function syncPriority(name: string): number {
+  const n = name.toLowerCase();
+  if (/sales\s*planner|planner/.test(n)) return 100;
+  if (/contact\s*summary|\bcs[\s._-]?\d|cliffs-crm-companies|all[-_]?contacts/.test(n)) return 95;
+  if (/first[-_\s]?year|new[-_\s]?first|counts as new/.test(n)) return 90;
+  if (/territory\s*new\s*leads|hiring signal/.test(n)) return 88;
+  if (/expeditor\s*inbox|inbox-all|inbox\.csv/.test(n)) return 85;
+  if (/blitz\s*list|blitz\s*board|sales\s*blitz/.test(n)) return 80;
+  if (/call[-_\s]?reasons|inside\s*sales\s*call/.test(n)) return 75;
+  if (/batch\d+-summary|blitz\s*research|\.md$/.test(n)) return 60;
+  if (/\.(xlsx|xls|csv|docx|tsv)$/i.test(n)) return 40;
+  return 10;
+}
+
+function pickSyncFiles(files: DriveFile[], limit = 30): DriveFile[] {
+  return [...files]
+    .filter((f) => f.mimeType !== FOLDER_MIME)
+    .filter((f) => {
+      const n = f.name.toLowerCase();
+      // Skip huge binaries / screenshots / PDFs that don't feed the book
+      if (/\.(png|jpe?g|gif|webp|pptx|pdf)$/i.test(n)) return false;
+      if (/screenshot|pgv|m1_|m2_|master\.json|aldcom/i.test(n)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const pd = syncPriority(b.name) - syncPriority(a.name);
+      if (pd) return pd;
+      return (Date.parse(b.modifiedTime) || 0) - (Date.parse(a.modifiedTime) || 0);
+    })
+    .slice(0, limit);
 }
 
 async function downloadFile(
@@ -135,11 +195,13 @@ async function softTrashInFolder(token: string, folderId: string, candidateIds: 
 function roleKey(name: string): string {
   const n = name.toLowerCase();
   if (/sales\s*planner|planner/.test(n)) return "sales_planner";
-  if (/expeditor\s*inbox|inbox/.test(n)) return "expeditor_inbox";
+  if (/expeditor\s*inbox|inbox-all|inbox\.csv/.test(n)) return "expeditor_inbox";
   if (/blitz\s*script|script\s*library/.test(n)) return "script_library";
-  if (/blitz\s*research/.test(n)) return "blitz_research";
-  if (/blitz\s*list|blitz\s*board|sales\s*blitz/.test(n)) return "blitz_list";
-  if (/contact\s*summary|\bcs[\s._-]?\d|\bcs\s+\d|all[-_]?contacts/.test(n)) return "contact_summary";
+  if (/blitz\s*research|batch\d+-summary/.test(n)) return "blitz_research";
+  if (/territory\s*new\s*leads/.test(n)) return "blitz_list";
+  if (/first[-_\s]?year|new[-_\s]?first|counts as new/.test(n)) return "blitz_list";
+  if (/blitz\s*list|blitz\s*board|sales\s*blitz|call[-_\s]?reasons|inside\s*sales/.test(n)) return "blitz_list";
+  if (/contact\s*summary|\bcs[\s._-]?\d|\bcs\s+\d|all[-_]?contacts|cliffs-crm-companies/.test(n)) return "contact_summary";
   return `other:${n.replace(/\.[^.]+$/, "")}`;
 }
 
@@ -176,10 +238,11 @@ export async function GET(request: Request) {
     if (!folderId) {
       return json({ configured: true, message: "Grok Drop folder not found", files: [], folderId: null });
     }
-    const listed = await listFolder(token, folderId);
+    const listed = await listFolderTree(token, folderId);
     return json({
       configured: true,
       folderId,
+      recursive: true,
       files: listed.map((f) => ({
         id: f.id,
         name: f.name,
@@ -220,6 +283,7 @@ export async function POST(request: Request) {
     try {
       const folderId = await resolveFolderId(token);
       if (!folderId) return json({ configured: true, message: "Grok Drop folder not found", trashed: [] });
+      // Prune only direct children of the Drop root (never deep subfolder archives).
       const listed = await listFolder(token, folderId);
       const toTrash = olderDuplicateIds(listed);
       const results = await softTrashInFolder(token, folderId, toTrash);
@@ -239,9 +303,9 @@ export async function POST(request: Request) {
     if (!folderId) {
       return json({ configured: true, message: "Grok Drop folder not found", files: [] });
     }
-    const listed = (await listFolder(token, folderId)).filter((f) => f.mimeType !== FOLDER_MIME);
+    const listed = await listFolderTree(token, folderId);
     const downloads = [];
-    for (const file of listed.slice(0, 25)) {
+    for (const file of pickSyncFiles(listed, 30)) {
       const got = await downloadFile(token, file);
       if (!got) continue;
       downloads.push({
@@ -253,7 +317,7 @@ export async function POST(request: Request) {
         contentBase64: got.contentBase64,
       });
     }
-    return json({ configured: true, folderId, files: downloads });
+    return json({ configured: true, folderId, recursive: true, files: downloads });
   } catch (e) {
     return json({ configured: true, error: e instanceof Error ? e.message : "Drive error", files: [] }, 500);
   }
