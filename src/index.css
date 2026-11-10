@@ -163,18 +163,20 @@ button.dial-pill {
   width: min(28rem, calc(100% - 1rem));
   display: grid;
   grid-template-columns: 1.35fr 1fr 1fr 1fr;
-  gap: 0.35rem;
-  padding: 0.45rem;
+  gap: 0.4rem;
+  padding: 0.5rem;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 0.85rem;
   z-index: 9;
   box-shadow: none;
+  touch-action: manipulation;
 }
 .day-action-bar .btn {
-  min-height: 2.85rem;
-  padding: 0.45rem 0.35rem;
-  font-size: 0.82rem;
+  min-height: 3rem;
+  padding: 0.5rem 0.35rem;
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 .tab .tab-badge {
   display: inline-grid;
@@ -265,6 +267,7 @@ button.dial-pill {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  padding-bottom: 0.5rem;
 }
 .car-stop .eyebrow {
   letter-spacing: 0.04em;
@@ -515,6 +518,8 @@ button.dial-pill {
   align-items: flex-start;
   padding: 0.8rem 0;
   border-bottom: 1px solid var(--line);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 4.5rem;
 }
 .list-item:last-child { border-bottom: none; }
 .select, textarea, .field-input {

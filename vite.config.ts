@@ -67,4 +67,16 @@ export default defineConfig({
   optimizeDeps: {
     include: ["xlsx", "mammoth"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/xlsx")) return "xlsx";
+          if (id.includes("node_modules/mammoth")) return "mammoth";
+          if (id.includes("node_modules/pdfjs-dist")) return "pdfjs";
+          if (id.includes("node_modules/tesseract.js")) return "ocr";
+        },
+      },
+    },
+  },
 });

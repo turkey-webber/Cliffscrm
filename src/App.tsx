@@ -164,7 +164,10 @@ function googleMapsStopUrl(c: Company, from?: Company | null): string {
 }
 
 function openMapsNavigate(c: Company, from?: Company | null) {
-  window.open(googleMapsStopUrl(c, from), "_blank", "noopener,noreferrer");
+  const isiOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const url = isiOS ? appleMapsUrl(c) : googleMapsStopUrl(c, from);
+  // Same-tab handoff is more reliable on phones than window.open popups.
+  window.location.assign(url);
 }
 
 function resultFromWrap(draft: WrapUp): CallResult {
@@ -661,8 +664,9 @@ export default function App() {
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  // Locks last 10m — tick slowly so we don't re-render / rewrite storage every second.
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
@@ -730,26 +734,30 @@ export default function App() {
   const liveCompanies = useMemo(() => releaseExpiredLocks(companies, now), [companies, now]);
   const liveUndo = undo && now < undo.expires ? undo : null;
 
+  // Persist raw companies (not lock-filtered live view). Debounce to cut localStorage thrash.
   useEffect(() => {
-    saveState({
-      companies: liveCompanies,
-      myScore,
-      callsDone,
-      visitsDone,
-      importLog,
-      dialer,
-      autoDialNext,
-      wrapUps,
-      captures,
-      mpc,
-      todayMode,
-      newsletterPrefs,
-      mpcSeenIds,
-      mpcDropFolderName,
-      scoutJobs,
-      scoutPrefs,
-    });
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
+    const id = window.setTimeout(() => {
+      saveState({
+        companies,
+        myScore,
+        callsDone,
+        visitsDone,
+        importLog,
+        dialer,
+        autoDialNext,
+        wrapUps,
+        captures,
+        mpc,
+        todayMode,
+        newsletterPrefs,
+        mpcSeenIds,
+        mpcDropFolderName,
+        scoutJobs,
+        scoutPrefs,
+      });
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -802,13 +810,18 @@ export default function App() {
   );
   const researchFeed = useMemo(() => recentResearchFeed(liveCompanies, 10), [liveCompanies]);
 
+  const carStopId = routeStops[0]?.id;
   useEffect(() => {
-    if (todayMode !== "car") return;
-    const stop = routeStops[0];
-    if (stop) setActiveId(stop.id);
-  }, [todayMode, routeStops[0]?.id]);
+    if (todayMode !== "car" || !carStopId) return;
+    setActiveId(carStopId);
+  }, [todayMode, carStopId]);
 
+  const dayLeadId = dayLead?.company.id;
+  const dayLeadNotes = dayLead?.company.notes;
+  const dayLeadResearchLen = dayLead?.company.research?.length;
+  const dayLeadTimelineLen = dayLead?.company.timeline?.length;
   useEffect(() => {
+    if (todayMode !== "desk") return;
     const c = dayLead?.company;
     if (!c) {
       setDialSuggestions(null);
@@ -827,7 +840,9 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dayLead?.company.id, dayLead?.company.notes, dayLead?.company.research?.length, dayLead?.company.timeline?.length]);
+    // Intentionally keyed on stable company fields — not the whole company object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayLead company snapshot
+  }, [todayMode, dayLeadId, dayLeadNotes, dayLeadResearchLen, dayLeadTimelineLen]);
 
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
@@ -1204,13 +1219,25 @@ export default function App() {
     }
     setDossierBusy("book");
     let n = 0;
+    const dossierMap: Record<string, CompanyDossier> = {};
     try {
-      for (const c of list) {
+      // Chunk updates so a large book doesn't freeze the dial UI.
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
         let d = buildCompanyDossier(c);
         if (enrich) d = await enrichDossierWithGrok(c, d);
-        setDossierById((prev) => ({ ...prev, [c.id]: d }));
-        setCompanies((prev) => prev.map((row) => (row.id === c.id ? applyDossierToCompany(row, d) : row)));
+        dossierMap[c.id] = d;
         n++;
+        if (n % 8 === 0 || i === list.length - 1) {
+          setDossierById((prev) => ({ ...prev, ...dossierMap }));
+          setCompanies((prev) =>
+            prev.map((row) => {
+              const built = dossierMap[row.id];
+              return built ? applyDossierToCompany(row, built) : row;
+            }),
+          );
+          await new Promise<void>((r) => window.setTimeout(r, 0));
+        }
       }
       flash(`Research book · ${n} dossiers${enrich ? " (Grok where available)" : ""}`);
     } finally {
@@ -1219,16 +1246,13 @@ export default function App() {
   }
 
   function applyImportResult(result: Awaited<ReturnType<typeof ingestBrowserFiles>>) {
+    const dossierMap: Record<string, CompanyDossier> = {};
     const withDossiers = result.companies.map((c) => {
       if (c.blitzState === "dnc") return c;
       const d = buildCompanyDossier(c);
+      dossierMap[c.id] = d;
       return applyDossierToCompany(c, d);
     });
-    const dossierMap: Record<string, CompanyDossier> = {};
-    for (const c of withDossiers) {
-      if (c.blitzState === "dnc") continue;
-      dossierMap[c.id] = buildCompanyDossier(c);
-    }
     setCompanies(withDossiers);
     setDossierById((prev) => ({ ...prev, ...dossierMap }));
     setImportLog(result.log);

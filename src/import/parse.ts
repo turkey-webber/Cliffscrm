@@ -1,5 +1,3 @@
-import * as XLSX from "xlsx";
-import mammoth from "mammoth";
 import type { ParsedTable } from "./types";
 
 function splitCsvLine(line: string): string[] {
@@ -38,12 +36,6 @@ export function parseCsvText(text: string): ParsedTable {
   const headers = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
   const rows = lines.slice(1).map(splitCsvLine);
   return { headers, rows, text };
-}
-
-function sheetToTable(wb: XLSX.WorkBook): ParsedTable {
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const csv = XLSX.utils.sheet_to_csv(sheet);
-  return parseCsvText(csv);
 }
 
 async function parsePdf(buffer: ArrayBuffer): Promise<ParsedTable> {
@@ -90,10 +82,14 @@ export async function parseFileBytes(
     mime.includes("spreadsheet") ||
     mime.includes("excel")
   ) {
+    const XLSX = await import("xlsx");
     const wb = XLSX.read(buffer, { type: "array" });
-    return sheetToTable(wb);
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const csv = XLSX.utils.sheet_to_csv(sheet);
+    return parseCsvText(csv);
   }
   if (lower.endsWith(".docx") || mime.includes("wordprocessingml") || mime.includes("msword")) {
+    const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ arrayBuffer: buffer });
     const text = result.value || "";
     // Word planners often use line/tab tables — try CSV heuristic
