@@ -3086,6 +3086,17 @@ export default function App() {
             newsletter APIs; Pages is the public static mirror (book stays in your browser).
           </p>
         </div>
+        <div className="card">
+          <h2>API tests (Postman)</h2>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Collection <strong>CliffsCRM APIs</strong> lives in your Postman workspace and in{" "}
+            <code>postman/collections/</code>. With <code>npm run dev</code> up:
+          </p>
+          <pre className="q4-block">npm run test:api</pre>
+          <p className="subtle">
+            Covers suggest, research-company, drop-sync, mpc-inbox, newsletter. No secrets in the collection.
+          </p>
+        </div>
       </>
     );
   } else if (morePane === "research") {

@@ -1,0 +1,271 @@
+{
+  "info": {
+    "name": "CliffsCRM APIs",
+    "description": "Local/Cursor-hosted API routes for CliffsCRM One Flow. Base URL defaults to Vite dev (`npm run dev`). Never store real Google/Grok secrets in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:5173" }
+  ],
+  "item": [
+    {
+      "name": "Health / status GETs",
+      "item": [
+        {
+          "name": "GET suggest status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('json body', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.be.an('object');",
+                  "  pm.expect(j).to.have.property('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/suggest",
+            "description": "Suggest API status — works without GROK_API_KEY (app fallback)."
+          }
+        },
+        {
+          "name": "GET research-company status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('configured flag present', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.have.property('configured');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/research-company"
+          }
+        },
+        {
+          "name": "GET drop-sync status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('json ok', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/drop-sync"
+          }
+        },
+        {
+          "name": "GET mpc-inbox status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/mpc-inbox"
+          }
+        },
+        {
+          "name": "GET newsletter status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/newsletter"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Suggest + research POSTs",
+      "item": [
+        {
+          "name": "POST suggest (app fallback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('returns suggestions or ok', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": {\n    \"name\": \"Acme Fabrication\",\n    \"contactName\": \"Pat Lee\",\n    \"contactTitle\": \"Operations Manager\",\n    \"city\": \"Montgomery\",\n    \"badges\": [\"jackpot\", \"prospect\"],\n    \"notes\": \"Hiring welders\",\n    \"research\": [{ \"source\": \"Careers\", \"date\": \"2026-11-01\", \"fact\": \"Hiring welders on careers page\" }]\n  },\n  \"local\": {\n    \"opener\": \"Hey Pat, this is Cliff with Express Employment Professionals, the locally owned Montgomery office. Can I come to your facility and meet you?\",\n    \"whyNow\": \"Hiring welders on careers page\",\n    \"appointmentAsk\": \"Can I come to your facility and meet you?\",\n    \"frontDesk\": \"Cliff with Express Employment — I have Pat Lee on my list.\",\n    \"provider\": \"app\",\n    \"blocks\": [],\n    \"objections\": []\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/suggest",
+            "description": "Requires local.opener. Never invent phones. Snapshot-only enrich when GROK is bound."
+          }
+        },
+        {
+          "name": "POST research-company (local dossier required)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 400', function () {",
+                  "  pm.expect([200, 400]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('json body', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": {\n    \"name\": \"Acme Fabrication\",\n    \"contactName\": \"Pat Lee\",\n    \"contactTitle\": \"Operations Manager\",\n    \"city\": \"Montgomery\",\n    \"badges\": [\"jackpot\"],\n    \"notes\": \"Uses Aerotek for 2nd shift\",\n    \"research\": [{ \"source\": \"Careers\", \"date\": \"2026-11-01\", \"fact\": \"Hiring welders\" }]\n  },\n  \"dossier\": {\n    \"staffingBio\": \"Acme Fabrication · Montgomery — staffing lens for Express Montgomery.\",\n    \"weinbergOpener\": \"Hey Pat, this is Cliff with Express Employment Professionals, the locally owned Montgomery office. Hiring welders. Can I come to your facility and meet you?\",\n    \"collectNext\": [\"Current staffing vendors (ask on call)\"],\n    \"completeness\": 75,\n    \"decisionMakers\": [{ \"text\": \"Pat Lee · Operations Manager\" }],\n    \"currentPostings\": [{ \"text\": \"Hiring welders\" }],\n    \"hiringSignals\": [{ \"text\": \"Hiring welders\" }],\n    \"shiftSchedules\": [],\n    \"staffingVendors\": [],\n    \"hiringApprovers\": []\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/research-company"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Drop / MPC / newsletter POSTs",
+      "item": [
+        {
+          "name": "POST drop-sync action=status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('reports configured', function () {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j).to.have.property('configured');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"status\"\n}"
+            },
+            "url": "{{baseUrl}}/api/drop-sync"
+          }
+        },
+        {
+          "name": "POST mpc-inbox action=status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responds', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 400, 401]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"status\",\n  \"seenIds\": []\n}"
+            },
+            "url": "{{baseUrl}}/api/mpc-inbox"
+          }
+        },
+        {
+          "name": "POST newsletter dry-run shape",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responds with json', function () {",
+                  "  pm.expect(pm.response.code).to.be.below(500);",
+                  "  pm.response.to.be.json;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"preview\"\n}"
+            },
+            "url": "{{baseUrl}}/api/newsletter"
+          }
+        }
+      ]
+    }
+  ]
+}
