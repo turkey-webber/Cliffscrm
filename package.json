@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:api": "newman run postman/collections/cliffscrm-apis.postman_collection.json -e postman/environments/local.postman_environment.json --color off",
+    "test:api:ci": "newman run postman/collections/cliffscrm-apis.postman_collection.json -e postman/environments/local.postman_environment.json --reporters cli,junit --reporter-junit-export postman/reports/junit.xml --color off"
   },
   "dependencies": {
     "mammoth": "^1.13.0",
@@ -22,6 +24,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "newman": "^6.2.3",
     "oxlint": "^1.90.0",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"

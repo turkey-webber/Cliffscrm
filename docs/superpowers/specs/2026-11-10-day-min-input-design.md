@@ -7,7 +7,7 @@
 ## Approaches considered
 
 1. **Recommended — Day cockpit on Today**  
-   Keep 5 tabs. Rebuild Today chrome: Desk|Truck, one Next hero, sticky Call / VM / Skip / Wrap strip. Capture FAB only (demote Suggest into Wrap/scripts). More badge for Hot/Gone/Daily. Auto Sync Drop when empty. After wrap → next. Evening Q4 badge when wrap-ups pending.  
+   Keep 5 tabs. Rebuild Today chrome: Office|Car, one Next hero, sticky Call / VM / Skip / Wrap strip. Capture FAB only (demote Suggest into Wrap/scripts). More badge for Hot/Gone/Daily. Auto Sync Drop when empty. After wrap → next. Evening Q4 badge when wrap-ups pending.  
    *Trade-off:* More logic on Today; Other tools stay one tap in More.
 
 2. **Collapse to 3 tabs** (Today / Capture / More)  
@@ -34,11 +34,11 @@
 - Sticky **day-action** bar on Today when a Next lead exists: Call · VM · Skip · Wrap — always in thumb reach above tab bar.
 
 ### Today
-- Desk | Truck segment stays.
+- Office | Car segment stays.
 - Compact progress: to-dial only by default; calls/visits goals as secondary line (not 3 big cells).
 - Empty book → one primary **Sync Drop** (not a banner essay).
 - Queue list: tap row = dial (or open if no phone); secondary Wrap stays.
-- Truck: primary Open loop; per-stop Call/Wrap unchanged.
+- Car: primary Open loop; sticky Navigate / Arrived; per-stop maps unchanged.
 
 ### Auto behavior (min input)
 - After Save & next wrap → focus next Next item (already) and keep Desk.

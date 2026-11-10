@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+postman/reports/
 
 # Editor directories and files
 .vscode/*

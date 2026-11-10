@@ -2,7 +2,13 @@ import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
-const API_ROUTES = ["/api/drop-sync", "/api/newsletter", "/api/mpc-inbox", "/api/suggest"] as const;
+const API_ROUTES = [
+  "/api/drop-sync",
+  "/api/newsletter",
+  "/api/mpc-inbox",
+  "/api/suggest",
+  "/api/research-company",
+] as const;
 
 /** Local stand-in for Cursor app functions under /api/* */
 function localApiPlugin(): Plugin {
@@ -60,5 +66,17 @@ export default defineConfig({
   plugins: [react(), localApiPlugin()],
   optimizeDeps: {
     include: ["xlsx", "mammoth"],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/xlsx")) return "xlsx";
+          if (id.includes("node_modules/mammoth")) return "mammoth";
+          if (id.includes("node_modules/pdfjs-dist")) return "pdfjs";
+          if (id.includes("node_modules/tesseract.js")) return "ocr";
+        },
+      },
+    },
   },
 });

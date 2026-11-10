@@ -7,6 +7,7 @@ export type ImportRole =
   | "blitz_list"
   | "blitz_research"
   | "script_library"
+  | "zoominfo_people"
   | "other";
 
 export type DropFileMeta = {
