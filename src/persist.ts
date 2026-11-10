@@ -1,6 +1,7 @@
 import { isDemoCompany, type Company, type Dialer } from "./data";
 import type { MpcCandidate } from "./mpc";
 import { DEFAULT_NEWSLETTER_PREFS, type NewsletterPrefs } from "./newsletter";
+import { DEFAULT_SCOUT_PREFS, type ScoutJob, type ScoutPrefs } from "./scout";
 import type { CaptureItem, WrapUp } from "./wrapup";
 
 export const STORAGE_KEY = "cliffscrm-prototype-v4";
@@ -22,6 +23,8 @@ export type Persisted = {
   /** Seen Gmail/Drive/local drop resume keys to avoid re-ingest */
   mpcSeenIds: string[];
   mpcDropFolderName: string;
+  scoutJobs: ScoutJob[];
+  scoutPrefs: ScoutPrefs;
 };
 
 export function defaultPersisted(): Persisted {
@@ -40,6 +43,8 @@ export function defaultPersisted(): Persisted {
     newsletterPrefs: { ...DEFAULT_NEWSLETTER_PREFS },
     mpcSeenIds: [],
     mpcDropFolderName: "",
+    scoutJobs: [],
+    scoutPrefs: { ...DEFAULT_SCOUT_PREFS },
   };
 }
 
@@ -72,6 +77,8 @@ export function loadState(): Persisted {
       },
       mpcSeenIds: Array.isArray(parsed.mpcSeenIds) ? parsed.mpcSeenIds.map(String).slice(0, 500) : [],
       mpcDropFolderName: typeof parsed.mpcDropFolderName === "string" ? parsed.mpcDropFolderName : "",
+      scoutJobs: Array.isArray(parsed.scoutJobs) ? (parsed.scoutJobs as ScoutJob[]).slice(0, 500) : [],
+      scoutPrefs: { ...DEFAULT_SCOUT_PREFS, ...(parsed.scoutPrefs || {}) },
       importLog:
         companies.length === 0 && (!parsed.importLog || /demo/i.test(parsed.importLog || ""))
           ? defaultPersisted().importLog

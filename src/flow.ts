@@ -48,6 +48,13 @@ function isDialEligible(c: Company, dueMap: Map<string, string>, today: string):
   if (c.plannerOrder != null) return true;
   if (due && due <= today) return true;
   if (c.lastResult === "callback") return true;
+  // Scout hiring signal on file — eligible only when research cites a job/hiring fact.
+  // Q4 appointments (plannerOrder / fromPlanner) already returned above and are never demoted here.
+  if (
+    c.research.some((r) => /job|hiring|posting|open role|scout|expansion/i.test(`${r.fact} ${r.source}`))
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -114,6 +121,19 @@ export function buildNextList(companies: Company[], wrapUps: WrapUp[] = []): Nex
         motion: "call",
         rank: 500 - c.plannerOrder,
         why: `Sales Planner #${c.plannerOrder}`,
+        due,
+      });
+      continue;
+    }
+    // Scout / hiring research — always below meetings, callbacks, and planner stops.
+    // Never invents; only uses verified research facts already on the company.
+    const hiring = c.research.find((r) => /job|hiring|posting|open role|scout|expansion/i.test(`${r.fact} ${r.source}`));
+    if (hiring && (c.blitzState === "open" || c.blitzState === "locked")) {
+      items.push({
+        company: c,
+        motion: "call",
+        rank: 300,
+        why: `Scout / hiring · ${hiring.fact}`,
         due,
       });
     }

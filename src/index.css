@@ -300,6 +300,67 @@ button.dial-pill {
   font-size: 0.9rem;
 }
 .research-list li, .timeline-list li { margin-top: 0.35rem; }
+
+.scout-segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: 0.85rem;
+}
+.scout-segment button {
+  flex: 1 1 auto;
+  min-width: 4.2rem;
+  font-size: 0.72rem;
+  padding: 0.45rem 0.35rem;
+}
+.scout-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+.scout-stats > div {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.scout-stats strong { font-size: 1.35rem; color: var(--ink); }
+.scout-cal {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  margin-top: 0.55rem;
+}
+.scout-cal-day {
+  flex: 0 0 auto;
+  min-width: 4.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.scout-cal-day.on {
+  background: var(--ink);
+  color: var(--signal);
+  border-color: var(--ink);
+}
+.scout-cal-day strong { font-size: 1rem; color: inherit; }
+.day-chip.on {
+  background: var(--ink);
+  color: var(--signal);
+  border-color: var(--ink);
+}
 .segment {
   display: grid;
   grid-template-columns: 1fr 1fr;

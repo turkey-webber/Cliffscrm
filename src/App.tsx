@@ -45,6 +45,31 @@ import {
 } from "./newsletter";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import {
+  DEFAULT_SCOUT_PREFS,
+  SCOUT_JOB_TYPES,
+  addStopToDayPlan,
+  applyScoutSignalToBook,
+  buildContactResearch,
+  buildMorningBriefing,
+  buildScoutCalendar,
+  buildTodays10,
+  competitorBoard,
+  filterJobs,
+  hyundaiPark,
+  jobsFromBookResearch,
+  jobsFromTerritorySeeds,
+  mapsDriveUrl,
+  mergeScoutJobs,
+  parseScoutPaste,
+  phoneGapQueue,
+  prospectMapUrl,
+  scoutCrmCopy,
+  scoutStats,
+  scoutTsv,
+  type ScoutJob,
+  type ScoutPrefs,
+} from "./scout";
 import { fetchSuggestions, suggestFor, type DialSuggestions } from "./suggest";
 import {
   applyCliffMoverDayPlan,
@@ -80,7 +105,9 @@ type MorePane =
   | "gone"
   | "hits"
   | "priority"
-  | "daily";
+  | "daily"
+  | "scout";
+type ScoutPane = "brief" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
 type TodayMode = "desk" | "truck";
 
 const IMPROVE_URL = (() => {
@@ -581,6 +608,12 @@ export default function App() {
   const [autoDialNext, setAutoDialNext] = useState(initial.autoDialNext !== false);
   const [dialSuggestions, setDialSuggestions] = useState<DialSuggestions | null>(null);
   const [suggestBusy, setSuggestBusy] = useState(false);
+  const [scoutJobs, setScoutJobs] = useState<ScoutJob[]>(initial.scoutJobs || []);
+  const [scoutPrefs, setScoutPrefs] = useState<ScoutPrefs>(initial.scoutPrefs || DEFAULT_SCOUT_PREFS);
+  const [scoutPane, setScoutPane] = useState<ScoutPane>("brief");
+  const [scoutPaste, setScoutPaste] = useState("");
+  const [scoutQuery, setScoutQuery] = useState("");
+  const [scoutCalDay, setScoutCalDay] = useState(todayIso());
   const [now, setNow] = useState(() => Date.now());
   const [copySheet, setCopySheet] = useState<string | null>(null);
   const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
@@ -691,8 +724,10 @@ export default function App() {
       newsletterPrefs,
       mpcSeenIds,
       mpcDropFolderName,
+      scoutJobs,
+      scoutPrefs,
     });
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName]);
+  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -708,6 +743,31 @@ export default function App() {
   const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
   const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
   const showDayBar = tab === "today" && !!dayLead && !wrapDraft && !captureOpen && !scriptOpen;
+
+  const allScoutJobs = useMemo(
+    () => mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds()),
+    [scoutJobs, liveCompanies],
+  );
+  const scoutTen = useMemo(() => buildTodays10(allScoutJobs, liveCompanies, 10), [allScoutJobs, liveCompanies]);
+  const scoutCounts = useMemo(() => scoutStats(allScoutJobs), [allScoutJobs]);
+  const scoutCalendar = useMemo(
+    () => buildScoutCalendar(liveCompanies, wrapUps, 14, scoutPrefs.distanceMi || 10),
+    [liveCompanies, wrapUps, scoutPrefs.distanceMi],
+  );
+  const scoutDay = scoutCalendar.find((d) => d.date === scoutCalDay) || scoutCalendar[0];
+  const scoutContacts = useMemo(
+    () => buildContactResearch(liveCompanies, scoutQuery),
+    [liveCompanies, scoutQuery],
+  );
+  const scoutFilteredJobs = useMemo(
+    () =>
+      filterJobs(allScoutJobs, {
+        distanceMi: scoutPrefs.distanceMi,
+        jobTypes: scoutPrefs.jobTypes,
+        query: scoutQuery,
+      }),
+    [allScoutJobs, scoutPrefs.distanceMi, scoutPrefs.jobTypes, scoutQuery],
+  );
 
   useEffect(() => {
     const c = dayLead?.company;
@@ -1035,6 +1095,39 @@ export default function App() {
     } else {
       window.location.href = `tel:${c.phone}`;
     }
+  }
+
+  function sweepScout() {
+    const merged = mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds());
+    setScoutJobs(merged);
+    setScoutPrefs((p) => ({ ...p, lastSweepAt: new Date().toISOString() }));
+    flash(`Scout sweep · ${merged.length} signals`);
+  }
+
+  function parseScoutCapture() {
+    const parsed = parseScoutPaste(scoutPaste);
+    if (!parsed.length) {
+      flash("No jobs parsed — paste company — title lines");
+      return;
+    }
+    const merged = mergeScoutJobs(scoutJobs, parsed);
+    setScoutJobs(merged);
+    let book = liveCompanies;
+    for (const j of parsed) book = applyScoutSignalToBook(book, j);
+    setCompanies(book);
+    setScoutPaste("");
+    flash(`Parsed ${parsed.length} · Q4 appointments untouched`);
+  }
+
+  function pushScoutToToday(job: ScoutJob) {
+    setCompanies((prev) => applyScoutSignalToBook(prev, job));
+    flash(job.lockedFromQ4 ? `Research filed · Q4 appt kept for ${job.company}` : `Scout signal on ${job.company}`);
+  }
+
+  function addNearbyToPlan(companyId: string) {
+    const date = scoutCalDay || todayIso();
+    setCompanies((prev) => addStopToDayPlan(prev, companyId, date));
+    flash("Nearby stop added — Q4 appointments not moved");
   }
 
   function applyImportResult(result: Awaited<ReturnType<typeof ingestBrowserFiles>>) {
@@ -1421,6 +1514,17 @@ export default function App() {
           </button>
           <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("daily"); }}>
             Report
+          </button>
+          <button
+            type="button"
+            className="day-chip"
+            onClick={() => {
+              setTab("more");
+              setMorePane("scout");
+              setScoutPane("brief");
+            }}
+          >
+            Scout{scoutTen.length ? <span className="tab-badge">{scoutTen.length}</span> : null}
           </button>
           {q4Pending > 0 ? (
             <button type="button" className="day-chip" onClick={() => setTab("q4")}>
@@ -2581,6 +2685,521 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "scout") {
+    const briefing = buildMorningBriefing(scoutTen);
+    const war = competitorBoard(allScoutJobs);
+    const gaps = phoneGapQueue(allScoutJobs);
+    const hyundai = hyundaiPark(allScoutJobs);
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Scout Desk</h1>
+          <p>
+            Montgomery territory · private employers only · Hyundai parked · Q4 appointments never
+            overridden
+          </p>
+        </div>
+        <div className="segment scout-segment">
+          {(
+            [
+              ["brief", "Brief"],
+              ["today10", "Today 10"],
+              ["jobs", "Jobs"],
+              ["prospect", "Prospect"],
+              ["plan", "Plan"],
+              ["contacts", "Contacts"],
+              ["briefing", "Briefing"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={scoutPane === id ? "on" : ""}
+              onClick={() => setScoutPane(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {scoutPane === "brief" && (
+          <>
+            <div className="panel">
+              <p className="eyebrow" style={{ marginTop: 0 }}>
+                Daily market brief
+              </p>
+              <h2 style={{ marginTop: "0.25rem" }}>Montgomery territory</h2>
+              <p className="subtle">
+                Private employers only — grouped by who is hiring. City, state, and police stay off
+                this desk. Hyundai is parked until there is a way in.
+              </p>
+              <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.65rem" }}>
+                <button className="btn btn-primary" onClick={() => sweepScout()}>
+                  Sweep now
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    sweepScout();
+                    flash("Enrich uses app + optional Grok on Cursor host");
+                  }}
+                >
+                  Enrich with Grok
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void copyText(scoutCrmCopy(scoutTen), "Grok CRM copy")}
+                >
+                  Copy for Grok CRM
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void copyText(scoutTsv(scoutTen), "10-call TSV")}
+                >
+                  Copy 10-call TSV
+                </button>
+              </div>
+              {scoutPrefs.lastSweepAt ? (
+                <p className="subtle">Last sweep {new Date(scoutPrefs.lastSweepAt).toLocaleString()}</p>
+              ) : null}
+            </div>
+            <div className="scout-stats">
+              <div>
+                <span className="subtle">Companies hiring</span>
+                <strong className="mono">{scoutCounts.companiesHiring}</strong>
+              </div>
+              <div>
+                <span className="subtle">Open roles</span>
+                <strong className="mono">{scoutCounts.openRoles}</strong>
+              </div>
+              <div>
+                <span className="subtle">New today</span>
+                <strong className="mono">{scoutCounts.newToday}</strong>
+              </div>
+              <div>
+                <span className="subtle">Open 14+ days</span>
+                <strong className="mono">{scoutCounts.open14Plus}</strong>
+              </div>
+            </div>
+            <div className="panel">
+              <h2>Today&apos;s 10</h2>
+              {!scoutTen.length && (
+                <p className="empty">Sweep or paste job alerts — Q4 / book research ranks first.</p>
+              )}
+              {scoutTen.map((j, i) => (
+                <div key={j.id} className="list-item" style={{ alignItems: "flex-start" }}>
+                  <strong className="mono">{i + 1}</strong>
+                  <div style={{ flex: 1 }}>
+                    <strong>
+                      {j.company}
+                      {j.lockedFromQ4 ? " · Q4" : ""}
+                    </strong>
+                    <div className="muted">
+                      {j.title} · {j.daysOpen}d
+                      {j.phone ? ` · ${j.phone}` : " · phone missing"}
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost" onClick={() => pushScoutToToday(j)}>
+                    File
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {scoutPane === "today10" && (
+          <>
+            <div className="panel">
+              <h2>Today</h2>
+              <p className="subtle">
+                Ten calls, competitor ads, missing phones, headcount spikes, and the Hyundai park —
+                Q4 appointments stay first on Today Desk.
+              </p>
+              <div className="row wrap" style={{ gap: "0.45rem" }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void copyText(scoutCrmCopy(scoutTen), "Grok CRM copy")}
+                >
+                  Copy for Grok CRM
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void copyText(scoutTsv(scoutTen), "10-call TSV")}
+                >
+                  Copy 10-call TSV
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() =>
+                    void copyText(JSON.stringify(scoutTen, null, 2), "Scout JSON")
+                  }
+                >
+                  Download JSON
+                </button>
+              </div>
+            </div>
+            <div className="panel">
+              <h2>Capture — no passwords</h2>
+              <p className="subtle">
+                Indeed, Zip, and LinkedIn block crawlers. Paste a results page or alert — do not send
+                board logins.
+              </p>
+              <textarea
+                className="field-input"
+                rows={5}
+                value={scoutPaste}
+                onChange={(e) => setScoutPaste(e.target.value)}
+                placeholder="Company — Title (28d)&#10;Or: Title at Company · Montgomery, AL"
+              />
+              <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.55rem" }}>
+                <button className="btn btn-primary" onClick={() => parseScoutCapture()}>
+                  Parse paste
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setTab("mpc");
+                    flash("Gmail alerts pull from MPC inbox when token is bound");
+                  }}
+                >
+                  Pull Gmail alerts
+                </button>
+              </div>
+            </div>
+            <div className="panel">
+              <h2>Truck brief</h2>
+              {scoutTen.map((j, i) => (
+                <div key={j.id} className="muted" style={{ marginTop: "0.35rem" }}>
+                  {i + 1}. <strong>{j.company}</strong> — {j.title} ({j.daysOpen}d)
+                </div>
+              ))}
+            </div>
+            <div className="panel">
+              <h2>Competitor war board</h2>
+              {!war.length && <p className="empty">No competitor postings parsed yet.</p>}
+              {war.slice(0, 12).map((j) => (
+                <div key={j.id} className="list-item">
+                  <div style={{ flex: 1 }}>
+                    <strong>{j.endClient || j.company}</strong>
+                    <div className="muted">
+                      {j.title}
+                      {j.postedBy ? ` · posted by ${j.postedBy}` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="panel">
+              <h2>Phone-gap queue</h2>
+              {gaps.slice(0, 12).map((j) => (
+                <div key={j.id} className="muted" style={{ marginTop: "0.3rem" }}>
+                  {j.company} — {j.title}
+                </div>
+              ))}
+            </div>
+            <div className="panel">
+              <h2>Hyundai supplier park</h2>
+              <p className="subtle">Parked until there is a way in.</p>
+              {hyundai.slice(0, 12).map((j) => (
+                <div key={j.id} className="muted" style={{ marginTop: "0.3rem" }}>
+                  {j.company}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {scoutPane === "jobs" && (
+          <div className="panel">
+            <h2>Jobs</h2>
+            <input
+              className="field-input"
+              value={scoutQuery}
+              onChange={(e) => setScoutQuery(e.target.value)}
+              placeholder="Filter company, title, city"
+            />
+            <div className="row wrap" style={{ gap: "0.35rem", marginTop: "0.55rem" }}>
+              {SCOUT_JOB_TYPES.map((t) => {
+                const on = scoutPrefs.jobTypes.includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`day-chip${on ? " on" : ""}`}
+                    onClick={() =>
+                      setScoutPrefs((p) => ({
+                        ...p,
+                        jobTypes: on ? p.jobTypes.filter((x) => x !== t) : [...p.jobTypes, t],
+                      }))
+                    }
+                  >
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+            {!scoutFilteredJobs.length && <p className="empty">No jobs match these filters.</p>}
+            {scoutFilteredJobs.slice(0, 40).map((j) => (
+              <div key={j.id} className="list-item">
+                <div style={{ flex: 1 }}>
+                  <strong>{j.company}</strong>
+                  <div className="muted">
+                    {j.title} · {j.source} · {j.daysOpen}d
+                    {j.phone ? ` · ${j.phone}` : ""}
+                  </div>
+                </div>
+                <button className="btn btn-ghost" onClick={() => pushScoutToToday(j)}>
+                  File
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {scoutPane === "prospect" && (
+          <div className="panel">
+            <h2>Prospect</h2>
+            <p className="subtle">
+              Drive from {OFFICE.address}. Book + territory plants — OpenStreetMap search, no invented
+              pins.
+            </p>
+            <p className="subtle">DRIVE FROM</p>
+            <input className="field-input" value={OFFICE.address} readOnly />
+            <input
+              className="field-input"
+              style={{ marginTop: "0.45rem" }}
+              value={scoutQuery}
+              onChange={(e) => setScoutQuery(e.target.value)}
+              placeholder="Address, plant, or city"
+            />
+            <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.55rem" }}>
+              <a
+                className="btn btn-primary"
+                href={prospectMapUrl(scoutQuery || OFFICE.address)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Recenter map
+              </a>
+              <a className="btn btn-ghost" href={mapsDriveUrl(scoutQuery)} target="_blank" rel="noreferrer">
+                Drive
+              </a>
+            </div>
+            <p className="subtle" style={{ marginTop: "0.75rem" }}>
+              DISTANCE
+            </p>
+            <div className="row wrap" style={{ gap: "0.35rem" }}>
+              {[0, 5, 10, 15, 25, 40].map((mi) => (
+                <button
+                  key={mi}
+                  type="button"
+                  className={`day-chip${(scoutPrefs.distanceMi || 10) === mi || (mi === 0 && !scoutPrefs.distanceMi) ? " on" : ""}`}
+                  onClick={() => setScoutPrefs((p) => ({ ...p, distanceMi: mi }))}
+                >
+                  {mi === 0 ? "Any" : `${mi} mi`}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: "0.75rem" }}>
+              {filterJobs(allScoutJobs, {
+                distanceMi: scoutPrefs.distanceMi || 999,
+                jobTypes: scoutPrefs.jobTypes,
+                query: scoutQuery,
+              })
+                .slice(0, 25)
+                .map((j) => (
+                  <div key={j.id} className="list-item">
+                    <div style={{ flex: 1 }}>
+                      <strong>{j.company}</strong>
+                      <div className="muted">
+                        {j.city}
+                        {j.miles != null ? ` · ${j.miles} mi` : ""}
+                        {j.phone ? ` · ${j.phone}` : " · phone missing"}
+                      </div>
+                    </div>
+                    <button className="btn btn-ghost" onClick={() => pushScoutToToday(j)}>
+                      File
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {scoutPane === "plan" && (
+          <>
+            <div className="panel">
+              <h2>Day plan</h2>
+              <p className="subtle">
+                Calendar shows Q4 / planner appointments first. Suggested nearby stops add below them —
+                never moves locked appointments.
+              </p>
+              <div className="scout-cal">
+                {scoutCalendar.map((d) => (
+                  <button
+                    key={d.date}
+                    type="button"
+                    className={`scout-cal-day${scoutCalDay === d.date ? " on" : ""}`}
+                    onClick={() => setScoutCalDay(d.date)}
+                  >
+                    <span>{d.label.split("·")[0]?.trim() || d.label}</span>
+                    <strong className="mono">{d.appointments.length}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {scoutDay && (
+              <>
+                <div className="panel">
+                  <h2>Appointments · {scoutDay.label}</h2>
+                  {!scoutDay.appointments.length && (
+                    <p className="empty">No Q4 / planner appointments this day.</p>
+                  )}
+                  {scoutDay.appointments.map((c) => (
+                    <div key={c.id} className="list-item">
+                      <div style={{ flex: 1 }}>
+                        <strong>{c.name}</strong>
+                        <div className="muted">
+                          Q4 locked
+                          {c.contactName ? ` · ${c.contactName}` : ""}
+                          {c.phone ? ` · ${c.phone}` : ""}
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setActiveId(c.id);
+                          setTab("today");
+                          setTodayMode("desk");
+                        }}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="panel">
+                  <h2>Suggested nearby</h2>
+                  {!scoutDay.suggested.length && (
+                    <p className="empty">No nearby book stops with coords in range.</p>
+                  )}
+                  {scoutDay.suggested.map((s) => (
+                    <div key={s.company.id} className="list-item">
+                      <div style={{ flex: 1 }}>
+                        <strong>{s.company.name}</strong>
+                        <div className="muted">
+                          {s.miles} mi · {s.why}
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-accent"
+                        disabled={s.alreadyOnPlan}
+                        onClick={() => addNearbyToPlan(s.company.id)}
+                      >
+                        {s.alreadyOnPlan ? "On plan" : "Add"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {scoutPane === "contacts" && (
+          <div className="panel">
+            <h2>Contact research</h2>
+            <p className="subtle">
+              ZoomInfo-style desk — verified book contacts only. Research links open out; never invent
+              a name or phone.
+            </p>
+            <input
+              className="field-input"
+              value={scoutQuery}
+              onChange={(e) => setScoutQuery(e.target.value)}
+              placeholder="Search company or contact"
+            />
+            {!scoutContacts.length && <p className="empty">No contacts match.</p>}
+            {scoutContacts.map((row) => (
+              <div key={row.company.id} className="card" style={{ marginTop: "0.55rem" }}>
+                <strong>{row.company.name}</strong>
+                <div className="muted">
+                  {row.contactName || "Contact missing"}
+                  {row.contactTitle ? ` · ${row.contactTitle}` : ""}
+                  {row.phone ? ` · ${row.phone}` : " · No phone"}
+                </div>
+                {row.researchFacts.length ? (
+                  <ul className="research-list">
+                    {row.researchFacts.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <div className="row wrap" style={{ gap: "0.35rem", marginTop: "0.45rem" }}>
+                  {row.links.slice(0, 5).map((l) => (
+                    <a key={l.url} className="btn btn-ghost" href={l.url} target="_blank" rel="noreferrer">
+                      {l.label}
+                    </a>
+                  ))}
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setActiveId(row.company.id);
+                      setMorePane("company");
+                    }}
+                  >
+                    Open account
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {scoutPane === "briefing" && (
+          <div className="panel">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2 style={{ margin: 0 }}>Morning briefing</h2>
+              <button className="btn btn-ghost" onClick={() => sweepScout()}>
+                Rebuild
+              </button>
+            </div>
+            <p className="subtle">
+              Built after each sweep. Open in Gmail or copy. Default morning rebuild when you open
+              Scout.
+            </p>
+            <label className="subtle">Recipient (saved on this device)</label>
+            <input
+              className="field-input"
+              value={scoutPrefs.briefingEmail}
+              onChange={(e) => setScoutPrefs((p) => ({ ...p, briefingEmail: e.target.value }))}
+            />
+            <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.55rem" }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const subject = encodeURIComponent(`Scout Desk · Montgomery · ${todayIso()}`);
+                  const body = encodeURIComponent(briefing);
+                  window.location.href = `mailto:${scoutPrefs.briefingEmail || OFFICE.agentEmail}?subject=${subject}&body=${body}`;
+                }}
+              >
+                Open in Gmail
+              </button>
+              <button className="btn btn-ghost" onClick={() => void copyText(briefing, "Scout briefing")}>
+                Copy text
+              </button>
+            </div>
+            <pre className="q4-block" style={{ marginTop: "0.75rem", maxHeight: 360, overflow: "auto" }}>
+              {briefing}
+            </pre>
+          </div>
+        )}
+      </>
+    );
   } else if (morePane === "hot" || morePane === "gone" || morePane === "hits" || morePane === "priority") {
     const title =
       morePane === "hot"
@@ -2873,6 +3492,15 @@ export default function App() {
           </button>
           <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
             Blitz assign <span>→</span>
+          </button>
+          <button
+            className="menu-link"
+            onClick={() => {
+              setMorePane("scout");
+              setScoutPane("brief");
+            }}
+          >
+            Scout Desk <span>→</span>
           </button>
           <button className="menu-link" onClick={() => setMorePane("hot")}>
             Hot Sheet <span>→</span>
