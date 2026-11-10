@@ -45,6 +45,7 @@ import {
 } from "./newsletter";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import { fetchSuggestions, suggestFor, type DialSuggestions } from "./suggest";
 import {
   applyCliffMoverDayPlan,
   buildDailyReportText,
@@ -577,6 +578,9 @@ export default function App() {
   const [visitsDone, setVisitsDone] = useState(initial.visitsDone);
   const [importLog, setImportLog] = useState(initial.importLog);
   const [dialer, setDialer] = useState<Dialer>(initial.dialer);
+  const [autoDialNext, setAutoDialNext] = useState(initial.autoDialNext !== false);
+  const [dialSuggestions, setDialSuggestions] = useState<DialSuggestions | null>(null);
+  const [suggestBusy, setSuggestBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [copySheet, setCopySheet] = useState<string | null>(null);
   const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
@@ -679,6 +683,7 @@ export default function App() {
       visitsDone,
       importLog,
       dialer,
+      autoDialNext,
       wrapUps,
       captures,
       mpc,
@@ -687,7 +692,7 @@ export default function App() {
       mpcSeenIds,
       mpcDropFolderName,
     });
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName]);
+  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -703,6 +708,27 @@ export default function App() {
   const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
   const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
   const showDayBar = tab === "today" && !!dayLead && !wrapDraft && !captureOpen && !scriptOpen;
+
+  useEffect(() => {
+    const c = dayLead?.company;
+    if (!c) {
+      setDialSuggestions(null);
+      return;
+    }
+    const local = suggestFor(c);
+    setDialSuggestions(local);
+    let cancelled = false;
+    setSuggestBusy(true);
+    void fetchSuggestions(c).then((s) => {
+      if (!cancelled) {
+        setDialSuggestions(s);
+        setSuggestBusy(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dayLead?.company.id, dayLead?.company.notes, dayLead?.company.research?.length, dayLead?.company.timeline?.length]);
 
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
@@ -936,11 +962,12 @@ export default function App() {
         setActiveId(nxt.company.id);
         setTab("today");
         setTodayMode("desk");
-        // Min-input: start the next dial when a phone is on file
-        if (nxt.company.phone) {
+        if (autoDialNext && nxt.company.phone) {
           window.setTimeout(() => dial(nxt.company), 280);
-        } else {
+        } else if (!nxt.company.phone) {
           flash(`Next: ${nxt.company.name} — no phone`);
+        } else {
+          flash(`Next: ${nxt.company.name}`);
         }
       } else if (q4Pending > 0 || nextWraps.some((w) => !w.doneInQ4 && w.resultDate === todayIso())) {
         flash("Queue clear — finish Q4 sheet");
@@ -1437,24 +1464,123 @@ export default function App() {
           </div>
         )}
         {todayMode === "desk" && lead && (
-          <div className="hero-call">
-            <p className="eyebrow">Next · {lead.motion}</p>
-            <h2>{lead.company.name}</h2>
-            <p>
-              {lead.why}
-              {lead.company.contactName ? ` · ${lead.company.contactName}` : ""}
-              {lead.company.phone ? ` · ${lead.company.phone}` : " · No phone"}
-            </p>
-            <button
-              className="btn btn-ghost"
-              style={{ marginTop: "0.75rem", color: "#eef5ef", borderColor: "#3a4a42" }}
-              onClick={() => {
-                setActiveId(lead.company.id);
-                setScriptOpen(true);
-              }}
-            >
-              Scripts
-            </button>
+          <div className="dial-cockpit">
+            <div className="hero-call">
+              <p className="eyebrow">Auto dial · {lead.motion}</p>
+              <h2>{lead.company.name}</h2>
+              <p>
+                {lead.why}
+                {lead.company.contactName ? ` · ${lead.company.contactName}` : ""}
+                {lead.company.contactTitle ? ` · ${lead.company.contactTitle}` : ""}
+              </p>
+              <p className="dial-phone mono">{lead.company.phone || "No phone on file"}</p>
+              <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg"
+                  style={{ flex: 1, minWidth: "8rem" }}
+                  onClick={() => {
+                    setActiveId(lead.company.id);
+                    dial(lead.company);
+                  }}
+                >
+                  Call
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                  onClick={() => {
+                    setActiveId(lead.company.id);
+                    setScriptOpen(true);
+                  }}
+                >
+                  Full scripts
+                </button>
+              </div>
+              <label className="auto-dial-toggle">
+                <input
+                  type="checkbox"
+                  checked={autoDialNext}
+                  onChange={(e) => setAutoDialNext(e.target.checked)}
+                />
+                Auto-dial next after wrap
+              </label>
+            </div>
+
+            <div className="dial-suggest panel">
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                <h2 style={{ margin: 0 }}>Suggestions</h2>
+                <span className="subtle">
+                  {suggestBusy ? "Refreshing…" : dialSuggestions?.provider === "grok" ? "Grok + app" : "App"}
+                </span>
+              </div>
+              {(dialSuggestions || suggestFor(lead.company)).blocks
+                .filter((b) => b.id === "opener" || b.id === "why" || b.id === "ask" || b.id === "desk")
+                .map((b) => (
+                  <div key={b.id} className="suggest-block">
+                    <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                      <strong>{b.title}</strong>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: "0.25rem 0.55rem", fontSize: "0.75rem" }}
+                        onClick={() => void copyText(b.body, b.title)}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <p>{b.body}</p>
+                  </div>
+                ))}
+              <details className="suggest-objections">
+                <summary>Objections</summary>
+                {(dialSuggestions || suggestFor(lead.company)).objections.map((o) => (
+                  <div key={o.label} className="suggest-block">
+                    <strong>{o.label}</strong>
+                    <p className="muted">{o.reply}</p>
+                  </div>
+                ))}
+              </details>
+            </div>
+
+            <div className="dial-notes panel">
+              <h2>Notes & comments</h2>
+              {lead.company.notes?.trim() ? (
+                <pre className="notes-pre">{lead.company.notes.trim()}</pre>
+              ) : (
+                <p className="empty">No notes yet — wrap-ups and captures land here.</p>
+              )}
+              {!!lead.company.research?.length && (
+                <>
+                  <h3>Research</h3>
+                  <ul className="research-list">
+                    {lead.company.research.slice(0, 6).map((r, i) => (
+                      <li key={`${r.source}-${i}`}>
+                        <strong>{r.source}</strong>
+                        {r.date ? ` · ${r.date}` : ""} — {r.fact}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {!!(lead.company.timeline || []).length && (
+                <>
+                  <h3>Timeline</h3>
+                  <ul className="timeline-list">
+                    {[...(lead.company.timeline || [])]
+                      .slice(-8)
+                      .reverse()
+                      .map((t) => (
+                        <li key={t.id}>
+                          <span className="subtle">{t.kind}</span> · {t.summary}
+                          {t.detail ? <div className="muted">{t.detail}</div> : null}
+                        </li>
+                      ))}
+                  </ul>
+                </>
+              )}
+            </div>
           </div>
         )}
         {(csFile || plannerFile || importLog) && (
@@ -2419,6 +2545,18 @@ export default function App() {
             <option value="aircall">Aircall (stub → tel)</option>
             <option value="google_voice">Google Voice</option>
           </select>
+          <label className="auto-dial-toggle settings-toggle">
+            <input
+              type="checkbox"
+              checked={autoDialNext}
+              onChange={(e) => setAutoDialNext(e.target.checked)}
+            />
+            Auto-dial next after Save &amp; next (default on)
+          </label>
+          <p className="subtle">
+            Desk shows opener, why-now, appointment ask, notes, and comments. Optional Grok rewrite when{" "}
+            <code>GROK_API_KEY</code> is bound on the Cursor host.
+          </p>
         </div>
         <div className="card">
           <h2>Office</h2>
@@ -2891,15 +3029,45 @@ export default function App() {
             {active && (
               <>
                 <div className="panel-box" style={{ marginTop: "0.75rem" }}>
-                  <h3 style={{ marginTop: 0 }}>Opener</h3>
-                  <p>{openerFor(active)}</p>
+                  <h3 style={{ marginTop: 0 }}>
+                    Opener{" "}
+                    <span className="subtle">
+                      {active.id === dayLead?.company.id && dialSuggestions?.provider === "grok"
+                        ? "· Grok"
+                        : "· app"}
+                    </span>
+                  </h3>
+                  <p>
+                    {active.id === dayLead?.company.id && dialSuggestions
+                      ? dialSuggestions.opener
+                      : openerFor(active)}
+                  </p>
                   <button
                     className="btn btn-ghost btn-block"
-                    onClick={() => void copyText(openerFor(active), "opener")}
+                    onClick={() =>
+                      void copyText(
+                        active.id === dayLead?.company.id && dialSuggestions
+                          ? dialSuggestions.opener
+                          : openerFor(active),
+                        "opener",
+                      )
+                    }
                   >
                     Copy opener
                   </button>
                 </div>
+                {active.id === dayLead?.company.id && dialSuggestions ? (
+                  <>
+                    <div className="panel">
+                      <h3>Why now</h3>
+                      <p>{dialSuggestions.whyNow}</p>
+                    </div>
+                    <div className="panel">
+                      <h3>Appointment ask</h3>
+                      <p>{dialSuggestions.appointmentAsk}</p>
+                    </div>
+                  </>
+                ) : null}
                 <div className="panel">
                   <h3>Front desk</h3>
                   <p>{FRONT_DESK_LINE}</p>

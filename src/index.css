@@ -238,6 +238,68 @@ button.dial-pill {
 }
 .hero-call h2 { margin: 0.35rem 0 0; color: #fff; font-size: 1.45rem; }
 .hero-call p { margin: 0.4rem 0 0; color: #b7c7bc; }
+.dial-phone {
+  margin: 0.65rem 0 0 !important;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--signal) !important;
+  letter-spacing: 0.02em;
+}
+.auto-dial-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: #c5d4c9;
+  cursor: pointer;
+  user-select: none;
+}
+.auto-dial-toggle input { accent-color: var(--signal); width: 1rem; height: 1rem; }
+.settings-toggle {
+  margin-top: 0.85rem;
+  color: var(--ink);
+}
+.dial-cockpit { display: flex; flex-direction: column; gap: 0; }
+.dial-suggest h2, .dial-notes h2 { margin-top: 0; }
+.dial-suggest h3, .dial-notes h3 {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.suggest-block {
+  margin-top: 0.7rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line);
+}
+.suggest-block:first-of-type { border-top: 0; padding-top: 0.35rem; }
+.suggest-block p { margin: 0.35rem 0 0; }
+.suggest-objections {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.55rem;
+}
+.suggest-objections summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--ink);
+}
+.notes-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.research-list, .timeline-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+}
+.research-list li, .timeline-list li { margin-top: 0.35rem; }
 .segment {
   display: grid;
   grid-template-columns: 1fr 1fr;
