@@ -204,6 +204,8 @@ function TodayScreen({
   stopCount,
   importLog,
   nextCall,
+  plannerLabel,
+  bookLabel,
   query,
   onQuery,
   onDial,
@@ -213,12 +215,15 @@ function TodayScreen({
   nearby,
   onSelectCompany,
   onCopyNotes,
+  onGoImport,
 }: {
   visitsDone: number;
   callsDone: number;
   stopCount: number;
   importLog: string;
   nextCall: Company | undefined;
+  plannerLabel: string;
+  bookLabel: string;
   query: string;
   onQuery: (q: string) => void;
   onDial: (c: Company) => void;
@@ -228,6 +233,7 @@ function TodayScreen({
   nearby: Company[];
   onSelectCompany: (id: string) => void;
   onCopyNotes: () => void;
+  onGoImport: () => void;
 }) {
   return (
     <>
@@ -237,30 +243,42 @@ function TodayScreen({
           {visitsDone} of {OFFICE.visitGoal} visits · {callsDone} of {OFFICE.callGoal} calls
         </p>
         <p className="subtle">
-          {stopCount} stop{stopCount === 1 ? "" : "s"} · from {OFFICE.address}
+          {stopCount} planner stop{stopCount === 1 ? "" : "s"} · from {OFFICE.address}
         </p>
       </div>
       {!nextCall && (
         <div className="demo-banner">
-          Book is empty — sync Grok Drop or import Contact Summary / Sales Planner. Phones stay blank
-          unless present in the file.
+          Import the newest <strong>Contact Summary</strong> (Book) and <strong>Sales Planner</strong>{" "}
+          (Today’s queue). Phones only if present in Contact Summary.
+          <button className="btn btn-primary btn-block" style={{ marginTop: "0.65rem" }} onClick={onGoImport}>
+            Go to Import
+          </button>
         </div>
       )}
       <div className="card">
         <p className="subtle" style={{ marginTop: 0 }}>
-          Source
+          Backbone files
         </p>
-        <h2 style={{ fontSize: "1.05rem", marginTop: "0.35rem" }}>{importLog}</h2>
+        <p style={{ marginTop: "0.35rem" }}>
+          <strong>Contact Summary</strong> · {bookLabel}
+        </p>
+        <p>
+          <strong>Sales Planner</strong> · {plannerLabel}
+        </p>
+        <p className="subtle">{importLog}</p>
       </div>
       <div className="card">
         {nextCall ? (
           <>
             <p className="subtle" style={{ marginTop: 0 }}>
-              Next call
+              Next on planner{nextCall.plannerOrder != null ? ` · stop ${nextCall.plannerOrder}` : ""}
+              {nextCall.inBook || nextCall.fromContactSummary ? "" : " · not in Contact Summary yet"}
             </p>
             <h2>{nextCall.name}</h2>
             <p>
-              {nextCall.city} · Territory {nextCall.territory}
+              {nextCall.city}
+              {nextCall.territory ? ` · Territory ${nextCall.territory}` : ""}
+              {nextCall.contactName ? ` · ${nextCall.contactName}` : ""}
               {nextCall.phone ? ` · ${nextCall.phone}` : " · No phone on file"}
             </p>
             <BadgeRow c={nextCall} />
@@ -275,8 +293,8 @@ function TodayScreen({
           </>
         ) : (
           <>
-            <h2>Nothing waiting</h2>
-            <p>Import a Sales Planner or open the book to add companies.</p>
+            <h2>No planner stops</h2>
+            <p>Drop in today’s Sales Planner (Word) — Contact Summary fills phones and contacts.</p>
           </>
         )}
       </div>
@@ -410,19 +428,21 @@ function CallsScreen({
       <div className="section-head">
         <h1>Calls</h1>
         <p>
-          Dialer: {dialer === "iphone" ? "iPhone tel:" : dialer === "aircall" ? "Aircall" : "Google Voice"}
+          Planner order · Dialer:{" "}
+          {dialer === "iphone" ? "iPhone tel:" : dialer === "aircall" ? "Aircall" : "Google Voice"}
         </p>
       </div>
       <div className="card">
-        <h2>Queue</h2>
-        {waiting.length === 0 && <p className="empty">Nothing waiting</p>}
+        <h2>Sales Planner queue</h2>
+        {waiting.length === 0 && <p className="empty">Import a Sales Planner to build today’s queue</p>}
         {waiting.map((c, i) => (
           <div key={c.id} className="list-item">
-            <strong className="mono">{i + 1}</strong>
+            <strong className="mono">{c.plannerOrder ?? i + 1}</strong>
             <div style={{ flex: 1 }}>
               <strong>{c.name}</strong>
               <div className="muted">
-                {c.phone || "No phone on file"} · {c.city}
+                {c.phone || "No phone on file"} · {c.city || "City TBD"}
+                {c.inBook || c.fromContactSummary ? "" : " · planner-only"}
               </div>
               <div style={{ marginTop: "0.45rem" }}>
                 <StateChip c={c} now={now} />
@@ -458,7 +478,8 @@ function BookScreen({
       <div className="section-head">
         <h1>Book</h1>
         <p>
-          {companies.length} companies
+          Contact Summary · {companies.filter((c) => c.inBook || c.fromContactSummary).length} in book
+          {companies.length ? ` · ${companies.length} total` : ""}
           {query.trim() ? ` · ${filtered.length} match` : ""}
         </p>
       </div>
@@ -477,10 +498,13 @@ function BookScreen({
           <div key={c.id} className="list-item">
             <div style={{ flex: 1 }}>
               <strong>{c.name}</strong>
-              <div className="muted">
-                {c.contactTitle || "Contact TBD"} · {c.address}, {c.city}
-              </div>
-              <BadgeRow c={c} />
+                <div className="muted">
+                  {c.contactName || c.contactTitle || "Contact TBD"}
+                  {c.plannerOrder != null ? ` · Planner #${c.plannerOrder}` : ""}
+                  {c.address || c.city ? ` · ${[c.address, c.city].filter(Boolean).join(", ")}` : ""}
+                  {c.phone ? ` · ${c.phone}` : ""}
+                </div>
+                <BadgeRow c={c} />
             </div>
             <div className="stack">
               <button className="btn btn-primary" onClick={() => onDial(c)}>
@@ -792,15 +816,19 @@ function ImportPane({
       </button>
       <div className="section-head">
         <h1>Import</h1>
-        <p>Grok Drop sync + manual upload. Word, Excel, PDF, CSV, Markdown — newest of each kind wins.</p>
+        <p>Two backbone files drive the desk. Newest of each kind wins; extras enrich recall.</p>
       </div>
       <div className="card">
-        <h2>Auto roles</h2>
-        <p>Contact summary / CS → Book</p>
-        <p>Sales planner (Word) → Today stops</p>
-        <p>Blitz list / board → Team desk</p>
-        <p>Blitz research → recall facts on matching companies</p>
-        <p>Expeditor inbox → recall notes</p>
+        <h2>Backbone</h2>
+        <p>
+          <strong>Contact Summary / CS</strong> (Excel) → Book of record (phones, contacts)
+        </p>
+        <p>
+          <strong>Sales Planner</strong> (Word) → Today &amp; Calls queue order
+        </p>
+        <p className="subtle" style={{ marginTop: "0.55rem" }}>
+          Optional: Blitz research / Expeditor inbox → facts on matching companies
+        </p>
       </div>
       <button className="btn btn-primary btn-block btn-lg" disabled={!!busy} onClick={onSyncDrive}>
         {busy === "drive" ? "Syncing Grok Drop…" : "Sync Grok Drop (Drive)"}
@@ -1037,13 +1065,37 @@ export default function App() {
   }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
-  const waiting = liveCompanies.filter((c) => c.blitzState === "open" || c.blitzState === "locked");
+
+  const plannerQueue = useMemo(
+    () =>
+      liveCompanies
+        .filter((c) => c.plannerOrder != null && (c.blitzState === "open" || c.blitzState === "locked"))
+        .sort((a, b) => (a.plannerOrder ?? 0) - (b.plannerOrder ?? 0)),
+    [liveCompanies],
+  );
+  // Sales Planner is the call/visit backbone; fall back to open book only if no planner loaded.
+  const waiting = plannerQueue.length
+    ? plannerQueue
+    : liveCompanies.filter((c) => c.blitzState === "open" || c.blitzState === "locked");
   const nextCall = waiting[0];
+
+  const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
+  const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
+  const bookCount = liveCompanies.filter((c) => c.inBook || c.fromContactSummary).length;
+  const plannerCount = liveCompanies.filter((c) => c.plannerOrder != null).length;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return liveCompanies;
-    return liveCompanies.filter(
+    const bookFirst = [...liveCompanies].sort((a, b) => {
+      const aBook = a.inBook || a.fromContactSummary ? 0 : 1;
+      const bBook = b.inBook || b.fromContactSummary ? 0 : 1;
+      if (aBook !== bBook) return aBook - bBook;
+      const ao = a.plannerOrder ?? 9999;
+      const bo = b.plannerOrder ?? 9999;
+      return ao - bo || a.name.localeCompare(b.name);
+    });
+    if (!q) return bookFirst;
+    return bookFirst.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.city.toLowerCase().includes(q) ||
@@ -1051,10 +1103,13 @@ export default function App() {
     );
   }, [liveCompanies, query]);
 
-  const mappedBase = useMemo(
-    () => liveCompanies.filter((c) => c.lat && c.lng && c.blitzState !== "dnc"),
-    [liveCompanies],
-  );
+  const mappedBase = useMemo(() => {
+    const withCoords = liveCompanies.filter((c) => c.lat && c.lng && c.blitzState !== "dnc");
+    const plannerMapped = withCoords
+      .filter((c) => c.plannerOrder != null)
+      .sort((a, b) => (a.plannerOrder ?? 0) - (b.plannerOrder ?? 0));
+    return plannerMapped.length ? plannerMapped : withCoords;
+  }, [liveCompanies]);
 
   const routeStops = useMemo(() => {
     let list = mappedBase;
@@ -1338,24 +1393,16 @@ export default function App() {
   }
 
   let main: ReactNode = null;
-  if (!active) {
-    main = (
-      <div className="card">
-        <h2>No companies</h2>
-        <p>Import a CSV to begin.</p>
-        <button className="btn btn-primary btn-block" onClick={() => { setTab("more"); setMorePane("import"); }}>
-          Go to Import
-        </button>
-      </div>
-    );
-  } else if (tab === "today") {
+  if (tab === "today") {
     main = (
       <TodayScreen
         visitsDone={visitsDone}
         callsDone={callsDone}
-        stopCount={routeStops.length}
+        stopCount={plannerCount || routeStops.length}
         importLog={importLog}
         nextCall={nextCall}
+        plannerLabel={plannerFile ? `${plannerFile.name} · ${plannerCount} stops` : "Not imported yet"}
+        bookLabel={csFile ? `${csFile.name} · ${bookCount} companies` : "Not imported yet"}
         query={query}
         onQuery={setQuery}
         onDial={dial}
@@ -1367,6 +1414,10 @@ export default function App() {
           setActiveId(id);
           setTab("more");
           setMorePane("blitz");
+        }}
+        onGoImport={() => {
+          setTab("more");
+          setMorePane("import");
         }}
         onCopyNotes={() =>
           void copyText(
@@ -1401,7 +1452,7 @@ export default function App() {
       />
     );
   } else if (morePane === "blitz") {
-    main = (
+    main = active ? (
       <BlitzScreen
         active={active}
         myScore={myScore}
@@ -1421,9 +1472,26 @@ export default function App() {
         onUndo={undoLast}
         onSelect={setActiveId}
       />
+    ) : (
+      <div className="card">
+        <h2>No companies yet</h2>
+        <p>Import Contact Summary and Sales Planner first.</p>
+        <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
+          Go to Import
+        </button>
+      </div>
     );
   } else if (morePane === "q4") {
-    main = <Q4Pane active={active} onBack={() => setMorePane("home")} onCopy={(t, l) => void copyText(t, l)} />;
+    main = active ? (
+      <Q4Pane active={active} onBack={() => setMorePane("home")} onCopy={(t, l) => void copyText(t, l)} />
+    ) : (
+      <div className="card">
+        <h2>No companies yet</h2>
+        <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
+          Go to Import
+        </button>
+      </div>
+    );
   } else if (morePane === "import") {
     main = (
       <ImportPane

@@ -32,7 +32,32 @@ export type Company = {
   lastResult?: CallResult;
   lastScore?: number;
   lastCaller?: string;
+  /** Present in Contact Summary (Book of record) */
+  inBook?: boolean;
+  /** 1-based stop order from Sales Planner; undefined = not on today’s planner */
+  plannerOrder?: number;
+  fromContactSummary?: boolean;
+  fromPlanner?: boolean;
 };
+
+export function normalizeCompanyName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s*\(demo\)\s*$/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function matchCompany(book: Company[], name: string): Company | undefined {
+  const key = normalizeCompanyName(name);
+  if (!key) return undefined;
+  const exact = book.find((c) => normalizeCompanyName(c.name) === key);
+  if (exact) return exact;
+  return book.find((c) => {
+    const n = normalizeCompanyName(c.name);
+    return n.includes(key) || key.includes(n);
+  });
+}
 
 export type Points = {
   discovery: number;
