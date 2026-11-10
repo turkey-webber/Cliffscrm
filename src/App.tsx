@@ -1475,7 +1475,7 @@ export default function App() {
         </div>
       </>
     );
-  } else if (morePane === "blitz" && active) {
+  } else if (morePane === "blitz") {
     main = (
       <>
         <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
@@ -1510,6 +1510,15 @@ export default function App() {
             <span>Results</span>
           </div>
         </div>
+        {!active ? (
+          <div className="card">
+            <h2>Nothing on the shared list</h2>
+            <p>Import Contact Summary, Sales Planner, or Territory New Leads first.</p>
+            <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
+              Go to Import
+            </button>
+          </div>
+        ) : (
         <div className="card">
           <div style={{ marginBottom: "0.45rem" }}>
             <StateChip c={active} now={now} />
@@ -1527,105 +1536,116 @@ export default function App() {
             Call
           </button>
         </div>
-        <div className="card">
-          <h2>Research</h2>
-          {!active.research.length && <p className="empty">No research yet</p>}
-          {active.research.map((r, i) => (
-            <div key={`${r.source}-${i}`} style={{ marginTop: i ? "0.55rem" : 0 }}>
-              <div>{r.fact}</div>
-              <div className="subtle">
-                {r.source}
-                {r.date ? ` · ${r.date}` : ""}
+        )}
+        {active && (
+          <>
+            <div className="card">
+              <h2>Research</h2>
+              {!active.research.length && <p className="empty">No research yet</p>}
+              {active.research.map((r, i) => (
+                <div key={`${r.source}-${i}`} style={{ marginTop: i ? "0.55rem" : 0 }}>
+                  <div>{r.fact}</div>
+                  <div className="subtle">
+                    {r.source}
+                    {r.date ? ` · ${r.date}` : ""}
+                  </div>
+                </div>
+              ))}
+              <div className="row wrap" style={{ marginTop: "0.65rem" }}>
+                {researchLinksFor(active.name)
+                  .slice(0, 4)
+                  .map((l) => (
+                    <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                      {l.label}
+                    </a>
+                  ))}
               </div>
             </div>
-          ))}
-          <div className="row wrap" style={{ marginTop: "0.65rem" }}>
-            {researchLinksFor(active.name).slice(0, 4).map((l) => (
-              <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
-                {l.label}
-              </a>
-            ))}
-          </div>
-        </div>
-        {scriptOn ? (
-          <div className="card script-card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2>{WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].title}</h2>
-              <button className="btn btn-ghost" onClick={() => setScriptOn(false)}>
-                Hide
+            {scriptOn ? (
+              <div className="card script-card">
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <h2>{WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].title}</h2>
+                  <button className="btn btn-ghost" onClick={() => setScriptOn(false)}>
+                    Hide
+                  </button>
+                </div>
+                <p>{scriptIdx === 0 ? openerFor(active) : WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].body}</p>
+                <p className="subtle" style={{ marginTop: "0.55rem" }}>
+                  Front desk: {FRONT_DESK_LINE}
+                </p>
+                <button className="btn btn-ghost" onClick={() => setScriptIdx((i) => i + 1)}>
+                  Next script card
+                </button>
+                <h3 style={{ marginTop: "0.85rem" }}>Objections</h3>
+                {OBJECTION_LINES.map((o) => (
+                  <div key={o.id} style={{ marginTop: "0.55rem" }}>
+                    <strong>{o.label}</strong>
+                    <div className="muted">{o.reply}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <button className="btn btn-ghost btn-block" onClick={() => setScriptOn(true)}>
+                Show scripts
+              </button>
+            )}
+            <div className="card">
+              <h2>Result → wrap-up</h2>
+              <p className="subtle">Points hit instantly · 10s undo · wrap-up still required</p>
+              <div className="grid-2" style={{ marginTop: "0.75rem" }}>
+                <button className="btn btn-primary btn-lg" onClick={() => applyResult("appointment")}>
+                  Appointment
+                </button>
+                <button className="btn btn-accent btn-lg" onClick={() => applyResult("job_order")}>
+                  Job order{is2x(active) ? " (2x)" : ""}
+                </button>
+                <button className="btn btn-ghost btn-lg" onClick={() => applyResult("discovery")}>
+                  Discovery done
+                </button>
+                <button className="btn btn-ghost btn-lg" onClick={() => applyResult("voicemail")}>
+                  Voicemail
+                </button>
+                <button className="btn btn-warn btn-lg" onClick={() => applyResult("callback")}>
+                  Callback
+                </button>
+                <button className="btn btn-danger btn-lg" onClick={() => applyResult("not_interested")}>
+                  Not interested
+                </button>
+              </div>
+              <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={() => applyResult("skip")}>
+                Skip
               </button>
             </div>
-            <p>{scriptIdx === 0 ? openerFor(active) : WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].body}</p>
-            <p className="subtle" style={{ marginTop: "0.55rem" }}>
-              Front desk: {FRONT_DESK_LINE}
-            </p>
-            <button className="btn btn-ghost" onClick={() => setScriptIdx((i) => i + 1)}>
-              Next script card
-            </button>
-            <h3 style={{ marginTop: "0.85rem" }}>Objections</h3>
-            {OBJECTION_LINES.map((o) => (
-              <div key={o.id} style={{ marginTop: "0.55rem" }}>
-                <strong>{o.label}</strong>
-                <div className="muted">{o.reply}</div>
+            {liveUndo && (
+              <div className="undo-bar">
+                <span>
+                  +{liveUndo.points} {liveUndo.label} · undo {Math.ceil((liveUndo.expires - now) / 1000)}s
+                </span>
+                <button
+                  className="btn btn-ghost"
+                  style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
+                  onClick={undoLast}
+                >
+                  Undo
+                </button>
               </div>
-            ))}
-          </div>
-        ) : (
-          <button className="btn btn-ghost btn-block" onClick={() => setScriptOn(true)}>
-            Show scripts
-          </button>
+            )}
+            <button
+              className="fab suggest-fab"
+              aria-label="Suggest"
+              title="Suggest an idea / Report a problem"
+              onClick={() => {
+                const body = encodeURIComponent(
+                  `Suggest an idea / Report a problem\n\nFrom: ${CALLER}\nScreen: Team desk / Blitz\nCompany: ${active.name}\n\nIdea or problem:\n`,
+                );
+                window.location.href = `mailto:${OFFICE.agentEmail}?subject=${encodeURIComponent("CliffsCRM Blitz suggestion")}&body=${body}`;
+                flash("Opening email to Cliff");
+              }}
+            >
+              ?
+            </button>
+          </>
         )}
-        <div className="card">
-          <h2>Result → wrap-up</h2>
-          <p className="subtle">Points hit instantly · 10s undo · wrap-up still required</p>
-          <div className="grid-2" style={{ marginTop: "0.75rem" }}>
-            <button className="btn btn-primary btn-lg" onClick={() => applyResult("appointment")}>
-              Appointment
-            </button>
-            <button className="btn btn-accent btn-lg" onClick={() => applyResult("job_order")}>
-              Job order{is2x(active) ? " (2x)" : ""}
-            </button>
-            <button className="btn btn-ghost btn-lg" onClick={() => applyResult("discovery")}>
-              Discovery done
-            </button>
-            <button className="btn btn-ghost btn-lg" onClick={() => applyResult("voicemail")}>
-              Voicemail
-            </button>
-            <button className="btn btn-warn btn-lg" onClick={() => applyResult("callback")}>
-              Callback
-            </button>
-            <button className="btn btn-danger btn-lg" onClick={() => applyResult("not_interested")}>
-              Not interested
-            </button>
-          </div>
-          <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={() => applyResult("skip")}>
-            Skip
-          </button>
-        </div>
-        {liveUndo && (
-          <div className="undo-bar">
-            <span>
-              +{liveUndo.points} {liveUndo.label} · undo {Math.ceil((liveUndo.expires - now) / 1000)}s
-            </span>
-            <button className="btn btn-ghost" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} onClick={undoLast}>
-              Undo
-            </button>
-          </div>
-        )}
-        <button
-          className="fab suggest-fab"
-          aria-label="Suggest"
-          title="Suggest an idea / Report a problem"
-          onClick={() => {
-            const body = encodeURIComponent(
-              `Suggest an idea / Report a problem\n\nFrom: ${CALLER}\nScreen: Team desk / Blitz\nCompany: ${active.name}\n\nIdea or problem:\n`,
-            );
-            window.location.href = `mailto:${OFFICE.agentEmail}?subject=${encodeURIComponent("CliffsCRM Blitz suggestion")}&body=${body}`;
-            flash("Opening email to Cliff");
-          }}
-        >
-          ?
-        </button>
       </>
     );
   } else if (morePane === "import") {
