@@ -61,7 +61,11 @@ export const DEFAULT_POINTS: Points = {
   multiplier: 2,
 };
 
-/** Demo book only — sample data, no real phones invented */
+export function isDemoCompany(c: Company): boolean {
+  return /\(DEMO\)\s*$/i.test(c.name) || /^c[1-5]$/.test(c.id);
+}
+
+/** Legacy sample book — no longer loaded into the live app */
 export const DEMO_COMPANIES: Company[] = [
   {
     id: "c1",

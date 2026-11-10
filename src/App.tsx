@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  DEMO_COMPANIES,
   DEFAULT_POINTS,
   OFFICE,
+  isDemoCompany,
   is2x,
   resultLabel,
   scoreFor,
@@ -50,7 +50,7 @@ type Persisted = {
 
 function defaultPersisted(): Persisted {
   return {
-    companies: structuredClone(DEMO_COMPANIES),
+    companies: [],
     myScore: 0,
     callsDone: 0,
     visitsDone: 0,
@@ -64,12 +64,17 @@ function loadState(): Persisted {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultPersisted();
     const parsed = JSON.parse(raw) as Partial<Persisted>;
+    const companies = Array.isArray(parsed.companies)
+      ? parsed.companies.filter((c) => c && !isDemoCompany(c as Company))
+      : [];
     return {
       ...defaultPersisted(),
       ...parsed,
-      companies: Array.isArray(parsed.companies) && parsed.companies.length
-        ? parsed.companies
-        : structuredClone(DEMO_COMPANIES),
+      companies,
+      importLog:
+        companies.length === 0 && (!parsed.importLog || /demo/i.test(parsed.importLog || ""))
+          ? defaultPersisted().importLog
+          : (parsed.importLog ?? defaultPersisted().importLog),
     };
   } catch {
     return defaultPersisted();
@@ -235,10 +240,12 @@ function TodayScreen({
           {stopCount} stop{stopCount === 1 ? "" : "s"} · from {OFFICE.address}
         </p>
       </div>
-      <div className="demo-banner">
-        Sample data until you import Express CSVs. Phones stay blank unless present in the file —
-        never invented.
-      </div>
+      {!nextCall && (
+        <div className="demo-banner">
+          Book is empty — sync Grok Drop or import Contact Summary / Sales Planner. Phones stay blank
+          unless present in the file.
+        </div>
+      )}
       <div className="card">
         <p className="subtle" style={{ marginTop: 0 }}>
           Source
@@ -857,7 +864,7 @@ function ImportPane({
         ))}
       </div>
       <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={onResetDemo}>
-        Reset to demo book
+        Clear book
       </button>
       <p className="subtle" style={{ marginTop: "0.55rem" }}>
         Phones stay blank unless present in the file. Drive sync uses your app secrets when configured.
@@ -1239,7 +1246,8 @@ export default function App() {
   async function onManualFiles(files: FileList) {
     setImportBusy("manual");
     try {
-      const result = await ingestBrowserFiles(files, companies, recall.facts, classifyImport);
+      const real = companies.filter((c) => !isDemoCompany(c));
+      const result = await ingestBrowserFiles(files, real, recall.facts, classifyImport);
       applyImportResult(result);
     } catch (e) {
       flash(e instanceof Error ? e.message : "Import failed");
@@ -1281,7 +1289,8 @@ export default function App() {
         flash(data.message || "No files in Grok Drop");
         return;
       }
-      const result = await ingestDrivePayload(data.files, companies, recall.facts, classifyImport);
+      const real = companies.filter((c) => !isDemoCompany(c));
+      const result = await ingestDrivePayload(data.files, real, recall.facts, classifyImport);
       applyImportResult(result);
     } catch (e) {
       flash(e instanceof Error ? e.message : "Drive sync failed");
@@ -1425,14 +1434,14 @@ export default function App() {
         busy={importBusy}
         recall={recall}
         onResetDemo={() => {
-          setCompanies(structuredClone(DEMO_COMPANIES));
-          setActiveId(DEMO_COMPANIES[0].id);
+          setCompanies([]);
+          setActiveId("");
           setMyScore(0);
           setCallsDone(0);
           setVisitsDone(0);
-          setImportLog("Reset to DEMO sample book");
+          setImportLog("Book cleared — import from Grok Drop");
           setRecall(emptyRecall());
-          flash("Demo data restored");
+          flash("Book cleared");
         }}
       />
     );
