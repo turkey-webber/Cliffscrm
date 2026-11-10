@@ -17,6 +17,9 @@ export type Persisted = {
   mpc: MpcCandidate[];
   todayMode: "desk" | "truck";
   newsletterPrefs: NewsletterPrefs;
+  /** Seen Gmail/Drive/local drop resume keys to avoid re-ingest */
+  mpcSeenIds: string[];
+  mpcDropFolderName: string;
 };
 
 export function defaultPersisted(): Persisted {
@@ -32,6 +35,8 @@ export function defaultPersisted(): Persisted {
     mpc: [],
     todayMode: "desk",
     newsletterPrefs: { ...DEFAULT_NEWSLETTER_PREFS },
+    mpcSeenIds: [],
+    mpcDropFolderName: "",
   };
 }
 
@@ -61,6 +66,8 @@ export function loadState(): Persisted {
           ? parsed.newsletterPrefs!.suggestions
           : [],
       },
+      mpcSeenIds: Array.isArray(parsed.mpcSeenIds) ? parsed.mpcSeenIds.map(String).slice(0, 500) : [],
+      mpcDropFolderName: typeof parsed.mpcDropFolderName === "string" ? parsed.mpcDropFolderName : "",
       importLog:
         companies.length === 0 && (!parsed.importLog || /demo/i.test(parsed.importLog || ""))
           ? defaultPersisted().importLog

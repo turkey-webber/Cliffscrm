@@ -17,6 +17,16 @@ import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
 import type { RecallStore } from "./import/types";
 import { buildCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
+import { isResumeFileName, resumeSourceLabel } from "./mpc/detect";
+import {
+  clearDirectoryHandle,
+  fileKey,
+  loadDirectoryHandle,
+  pickResumeDropFolder,
+  scanDropFolder,
+  supportsDirectoryPicker,
+} from "./mpc/localDrop";
+import { parseResumeFromBase64, parseResumeFromFile } from "./mpc/parseResume";
 import { loadState, saveState } from "./persist";
 import {
   callNoteFields,
@@ -564,6 +574,13 @@ export default function App() {
   const [assignCaptureId, setAssignCaptureId] = useState<string | null>(null);
   const [scriptOpen, setScriptOpen] = useState(false);
   const pendingScore = useRef<{ result: CallResult; points: number } | null>(null);
+  const [mpcSeenIds, setMpcSeenIds] = useState<string[]>(initial.mpcSeenIds || []);
+  const [mpcDropFolderName, setMpcDropFolderName] = useState(initial.mpcDropFolderName || "");
+  const [mpcDropHandle, setMpcDropHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [mpcIngestBusy, setMpcIngestBusy] = useState<string | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -596,6 +613,35 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- launch-only auto sync
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const handle = await loadDirectoryHandle();
+      if (cancelled || !handle) return;
+      setMpcDropHandle(handle);
+      setMpcDropFolderName((n) => n || handle.name);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mpcDropHandle) return;
+    const tick = () => {
+      void scanMpcDropFolder(mpcDropHandle);
+    };
+    const id = window.setInterval(tick, 45_000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll handle only
+  }, [mpcDropHandle]);
+
+  useEffect(() => {
+    if (tab !== "mpc") return;
+    void syncMpcInbox({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pull when entering MPC
+  }, [tab]);
+
   const liveCompanies = useMemo(() => releaseExpiredLocks(companies, now), [companies, now]);
   const liveUndo = undo && now < undo.expires ? undo : null;
 
@@ -612,8 +658,10 @@ export default function App() {
       mpc,
       todayMode,
       newsletterPrefs,
+      mpcSeenIds,
+      mpcDropFolderName,
     });
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode, newsletterPrefs]);
+  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -1004,58 +1052,198 @@ export default function App() {
     flash(`Kept newest · removed ${removed.length}`);
   }
 
-  async function readResumeFile(file: File): Promise<string> {
-    const name = file.name.toLowerCase();
-    if (name.endsWith(".txt") || name.endsWith(".md") || file.type.startsWith("text/")) {
-      return file.text();
-    }
-    if (name.endsWith(".docx") || file.type.includes("wordprocessingml")) {
-      const mammoth = await import("mammoth");
-      const buf = await file.arrayBuffer();
-      const res = await mammoth.extractRawText({ arrayBuffer: buf });
-      return res.value || "";
-    }
-    if (name.endsWith(".pdf") || file.type === "application/pdf") {
-      const pdfjs = await import("pdfjs-dist");
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString();
-      const data = new Uint8Array(await file.arrayBuffer());
-      const doc = await pdfjs.getDocument({ data }).promise;
-      const chunks: string[] = [];
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
-        chunks.push(content.items.map((it) => ("str" in it ? String(it.str) : "")).join(" "));
-      }
-      return chunks.join("\n");
-    }
-    return file.text();
+
+  function rememberMpcSeen(ids: string[]) {
+    if (!ids.length) return;
+    setMpcSeenIds((prev) => [...new Set([...ids, ...prev])].slice(0, 500));
+  }
+
+  function ingestResumeCandidate(input: {
+    resumeText: string;
+    name?: string;
+    trade?: string;
+    note?: string;
+    source: "gmail" | "drive" | "camera" | "file" | "folder" | "paste";
+    seenId?: string;
+  }) {
+    const resumeText = input.resumeText.trim();
+    if (!resumeText) return null;
+    const noteBits = [
+      input.note,
+      input.source === "paste" ? "" : resumeSourceLabel(input.source),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const candidate = buildCandidate({
+      name: input.name || mpcForm.name,
+      trade: input.trade || mpcForm.trade,
+      note: noteBits || mpcForm.note,
+      resumeText,
+      book: liveCompanies,
+    });
+    setMpc((prev) => [candidate, ...prev.filter((c) => c.resumeText !== resumeText)]);
+    setSelectedMpc(candidate.id);
+    if (input.seenId) rememberMpcSeen([input.seenId]);
+    return candidate;
   }
 
   async function submitMpc() {
     const resumeText = mpcForm.resumeText.trim();
     if (!resumeText) {
-      flash("Paste a resume or note first");
+      flash("Paste a resume, take a photo, or choose files first");
       return;
     }
     setMpcBusy(true);
     try {
-      const candidate = buildCandidate({
+      const candidate = ingestResumeCandidate({
+        resumeText,
         name: mpcForm.name,
         trade: mpcForm.trade,
         note: mpcForm.note,
-        resumeText,
-        book: liveCompanies,
+        source: "paste",
       });
-      setMpc((prev) => [candidate, ...prev]);
-      setSelectedMpc(candidate.id);
       setMpcForm({ name: "", trade: "", note: "", resumeText: "" });
-      flash(`${candidate.matches.length} company matches`);
+      flash(candidate ? `${candidate.matches.length} company matches` : "No resume text");
     } finally {
       setMpcBusy(false);
     }
+  }
+
+  async function ingestResumeFiles(
+    files: File[],
+    source: "camera" | "file" | "folder",
+  ) {
+    const list = [...files].filter((f) => isResumeFileName(f.name, f.type) || source === "camera");
+    if (!list.length) {
+      flash("No resume-like files in that selection");
+      return;
+    }
+    setMpcIngestBusy(source);
+    let added = 0;
+    try {
+      for (const file of list) {
+        const parsed = await parseResumeFromFile(file);
+        if (!parsed.text.trim()) {
+          flash(parsed.warning || `Could not parse ${file.name}`);
+          continue;
+        }
+        if (parsed.warning) flash(`${file.name}: ${parsed.warning}`);
+        const seenId = source === "folder" ? `folder:${fileKey(file)}` : `file:${fileKey(file)}`;
+        if (mpcSeenIds.includes(seenId)) continue;
+        ingestResumeCandidate({
+          resumeText: parsed.text,
+          note: file.name,
+          source,
+          seenId,
+        });
+        added++;
+      }
+      flash(added ? `Added ${added} MPC candidate${added === 1 ? "" : "s"}` : "No new resumes");
+      if (added) setTab("mpc");
+    } finally {
+      setMpcIngestBusy(null);
+    }
+  }
+
+  async function syncMpcInbox(opts?: { silent?: boolean }) {
+    setMpcIngestBusy("inbox");
+    try {
+      const res = await fetch("/api/mpc-inbox", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "pull", seenIds: mpcSeenIds }),
+      });
+      const data = (await res.json()) as {
+        configured?: boolean;
+        message?: string;
+        error?: string;
+        resumes?: {
+          id: string;
+          source: "gmail" | "drive";
+          name: string;
+          mimeType: string;
+          contentBase64: string;
+          subject?: string;
+          from?: string;
+          messageId?: string;
+        }[];
+      };
+      if (!res.ok) throw new Error(data.error || "Inbox sync failed");
+      if (!data.configured) {
+        if (!opts?.silent) flash(data.message || "cliffsgrokbox inbox not configured");
+        return;
+      }
+      const resumes = data.resumes || [];
+      if (!resumes.length) {
+        if (!opts?.silent) flash(data.message || "No new forwarded resumes");
+        return;
+      }
+      let added = 0;
+      for (const item of resumes) {
+        const parsed = await parseResumeFromBase64(item.contentBase64, item.name, item.mimeType);
+        if (!parsed.text.trim()) continue;
+        const seenId = item.source === "gmail" ? `gmail:${item.messageId || item.id}` : `drive:${item.id}`;
+        ingestResumeCandidate({
+          resumeText: parsed.text,
+          note: [item.subject, item.from, item.name].filter(Boolean).join(" · "),
+          source: item.source,
+          seenId,
+        });
+        added++;
+      }
+      flash(added ? `Inbox → ${added} MPC candidate${added === 1 ? "" : "s"}` : data.message || "Nothing parsed");
+      if (added) setTab("mpc");
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Inbox sync failed");
+    } finally {
+      setMpcIngestBusy(null);
+    }
+  }
+
+  async function connectMpcDropFolder() {
+    try {
+      const handle = await pickResumeDropFolder();
+      if (!handle) {
+        folderInputRef.current?.click();
+        return;
+      }
+      setMpcDropHandle(handle);
+      setMpcDropFolderName(handle.name);
+      flash(`Drop folder set: ${handle.name}`);
+      await scanMpcDropFolder(handle);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      folderInputRef.current?.click();
+    }
+  }
+
+  async function scanMpcDropFolder(handle = mpcDropHandle) {
+    if (!handle) return;
+    setMpcIngestBusy("folder");
+    try {
+      const seen = new Set(mpcSeenIds);
+      const hits = await scanDropFolder(handle, seen);
+      const resumeHits = hits.filter((h) => isResumeFileName(h.name, h.file.type));
+      if (!resumeHits.length) {
+        flash("Drop folder watched — no new resumes");
+        return;
+      }
+      await ingestResumeFiles(
+        resumeHits.map((h) => h.file),
+        "folder",
+      );
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Folder scan failed");
+    } finally {
+      setMpcIngestBusy(null);
+    }
+  }
+
+  async function disconnectMpcDropFolder() {
+    await clearDirectoryHandle();
+    setMpcDropHandle(null);
+    setMpcDropFolderName("");
+    flash("Drop folder disconnected");
   }
 
   function addProspectToBook(m: MpcMatch) {
@@ -1369,8 +1557,107 @@ export default function App() {
           <h1>MPC</h1>
           <p>Resume in → pair with companies in and not in your book → research links out.</p>
         </div>
-        <div className="card">
+        <div className="panel">
           <h2>Receive candidate</h2>
+          <p className="subtle" style={{ marginTop: "0.35rem" }}>
+            Forward resumes to cliffsgrokbox@gmail.com, shoot a photo on iPhone, pick files, or watch a
+            desktop folder.
+          </p>
+          <div className="row wrap" style={{ marginTop: "0.75rem" }}>
+            <button
+              className="btn btn-primary"
+              style={{ flex: "1 1 8rem" }}
+              disabled={!!mpcIngestBusy}
+              onClick={() => void syncMpcInbox()}
+            >
+              {mpcIngestBusy === "inbox" ? "Checking…" : "Sync cliffsgrokbox"}
+            </button>
+            <button
+              className="btn btn-accent"
+              style={{ flex: "1 1 8rem" }}
+              disabled={!!mpcIngestBusy}
+              onClick={() => cameraInputRef.current?.click()}
+            >
+              {mpcIngestBusy === "camera" ? "Reading…" : "iPhone camera"}
+            </button>
+          </div>
+          <div className="row wrap" style={{ marginTop: "0.55rem" }}>
+            <button
+              className="btn btn-ghost"
+              style={{ flex: "1 1 8rem" }}
+              disabled={!!mpcIngestBusy}
+              onClick={() => filesInputRef.current?.click()}
+            >
+              Choose files
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ flex: "1 1 8rem" }}
+              disabled={!!mpcIngestBusy}
+              onClick={() => void connectMpcDropFolder()}
+            >
+              {mpcDropFolderName ? "Change folder" : "Use drop folder"}
+            </button>
+          </div>
+          {mpcDropFolderName ? (
+            <div className="panel-box" style={{ marginTop: "0.75rem" }}>
+              <strong>Watching: {mpcDropFolderName}</strong>
+              <p className="subtle">New PDF/DOCX/TXT/photos here become MPC candidates automatically.</p>
+              <div className="row wrap" style={{ marginTop: "0.45rem" }}>
+                <button className="btn btn-ghost" disabled={!!mpcIngestBusy} onClick={() => void scanMpcDropFolder()}>
+                  Scan now
+                </button>
+                <button className="btn btn-ghost" onClick={() => void disconnectMpcDropFolder()}>
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="subtle" style={{ marginTop: "0.55rem" }}>
+              {supportsDirectoryPicker()
+                ? "Desktop: choose a folder to keep as your resume drop."
+                : "On iPhone use Camera or Choose files. Folder watch needs desktop Chrome/Edge."}
+            </p>
+          )}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={(e) => {
+              const files = e.target.files ? [...e.target.files] : [];
+              e.target.value = "";
+              if (files.length) void ingestResumeFiles(files, "camera");
+            }}
+          />
+          <input
+            ref={filesInputRef}
+            type="file"
+            accept=".pdf,.docx,.doc,.txt,.md,image/*,application/pdf,text/plain"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = e.target.files ? [...e.target.files] : [];
+              e.target.value = "";
+              if (files.length) void ingestResumeFiles(files, "file");
+            }}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            hidden
+            {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+            onChange={(e) => {
+              const files = e.target.files ? [...e.target.files] : [];
+              e.target.value = "";
+              if (!files.length) return;
+              const top = files[0].webkitRelativePath?.split("/")[0] || "Selected folder";
+              setMpcDropFolderName(top);
+              void ingestResumeFiles(files, "folder");
+            }}
+          />
           <label className="field-label">Name</label>
           <input
             className="select"
@@ -1398,39 +1685,15 @@ export default function App() {
             rows={6}
             value={mpcForm.resumeText}
             onChange={(e) => setMpcForm((f) => ({ ...f, resumeText: e.target.value }))}
-            placeholder="Paste resume, or drop a PDF / DOCX / TXT"
+            placeholder="Paste resume text, or use Camera / Files above"
           />
-          <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
-            Attach resume file
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt,.md,application/pdf,text/plain"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                void (async () => {
-                  try {
-                    const text = await readResumeFile(f);
-                    setMpcForm((prev) => ({
-                      ...prev,
-                      resumeText: [prev.resumeText, text].filter(Boolean).join("\n\n"),
-                    }));
-                    flash(`Loaded ${f.name}`);
-                  } catch (err) {
-                    flash(err instanceof Error ? err.message : "Could not read resume");
-                  }
-                })();
-                e.target.value = "";
-              }}
-            />
-          </label>
           <button
             className="btn btn-primary btn-block btn-lg"
             style={{ marginTop: "0.65rem" }}
-            disabled={mpcBusy}
+            disabled={mpcBusy || !!mpcIngestBusy}
             onClick={() => void submitMpc()}
           >
-            {mpcBusy ? "Matching…" : "Match to market"}
+            {mpcBusy ? "Matching…" : "Match pasted text to market"}
           </button>
         </div>
         {selected && (

@@ -2,16 +2,20 @@ import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
+const API_ROUTES = ["/api/drop-sync", "/api/newsletter", "/api/mpc-inbox"] as const;
+
 /** Local stand-in for Cursor app functions under /api/* */
 function localApiPlugin(): Plugin {
   return {
-    name: "local-api-drop-sync",
+    name: "local-api-routes",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.startsWith("/api/drop-sync")) return next();
+        const pathOnly = (req.url || "").split("?")[0];
+        const match = API_ROUTES.find((r) => pathOnly === r || pathOnly.startsWith(`${r}/`));
+        if (!match) return next();
         try {
-          const mod = await server.ssrLoadModule("/api/drop-sync.ts");
-          const url = new URL(req.url, "http://127.0.0.1");
+          const mod = await server.ssrLoadModule(`${match}.ts`);
+          const url = new URL(req.url || match, "http://127.0.0.1");
           const chunks: Buffer[] = [];
           await new Promise<void>((resolve) => {
             req.on("data", (c) => chunks.push(Buffer.from(c)));
@@ -28,6 +32,11 @@ function localApiPlugin(): Plugin {
             body: req.method === "GET" || req.method === "HEAD" ? undefined : body,
           });
           const handler = req.method === "GET" ? mod.GET : mod.POST;
+          if (typeof handler !== "function") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "method not allowed" }));
+            return;
+          }
           const response: Response = await handler(request);
           res.statusCode = response.status;
           response.headers.forEach((v, k) => res.setHeader(k, v));

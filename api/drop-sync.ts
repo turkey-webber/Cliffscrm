@@ -132,11 +132,20 @@ function syncPriority(name: string): number {
   return 10;
 }
 
+function isResumeDropFile(name: string): boolean {
+  const n = name.toLowerCase();
+  if (/contact\s*summary|sales\s*planner|blitz|territory|inbox\.csv|expeditor/i.test(n)) return false;
+  if (/resume|cv|curriculum|candidate|mpc|talent/i.test(n) && /\.(pdf|docx?|txt)$/i.test(n)) return true;
+  return false;
+}
+
 function pickSyncFiles(files: DriveFile[], limit = 30): DriveFile[] {
   return [...files]
     .filter((f) => f.mimeType !== FOLDER_MIME)
     .filter((f) => {
       const n = f.name.toLowerCase();
+      // Resume PDFs/DOCX for MPC are pulled via /api/mpc-inbox — skip here
+      if (isResumeDropFile(n)) return false;
       // Skip huge binaries / screenshots / PDFs that don't feed the book
       if (/\.(png|jpe?g|gif|webp|pptx|pdf)$/i.test(n)) return false;
       if (/screenshot|pgv|m1_|m2_|master\.json|aldcom/i.test(n)) return false;
