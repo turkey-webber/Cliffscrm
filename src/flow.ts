@@ -74,7 +74,7 @@ export function toDialToday(companies: Company[], wrapUps: WrapUp[] = []): Compa
 
 /**
  * Ranked Next list: meetings / planner visits first, then callbacks due,
- * then remaining planner calls. Desk and Truck both read this.
+ * then remaining planner calls. Office and Car both read this.
  */
 export function buildNextList(companies: Company[], wrapUps: WrapUp[] = []): NextItem[] {
   const today = todayIso();
@@ -194,7 +194,7 @@ export function orderRouteNearest(stops: Company[], originLat = OFFICE.lat, orig
 }
 
 /**
- * Shared truck route: up to `max` stops from the same Next list.
+ * Shared car route: up to `max` stops from the same Next list.
  * Planner visit/appt stops keep Sales Planner order at the front (Q4 sacred);
  * other Next stops with a place are nearest-neighbor after that (office → loop).
  */
@@ -215,7 +215,7 @@ export function buildRouteStops(next: NextItem[], max = 8): Company[] {
     seen.add(c.id);
     rest.push(c);
   }
-  // If nothing has a place yet, still surface ranked Next names so Truck isn't empty.
+  // If nothing has a place yet, still surface ranked Next names so Car isn't empty.
   if (!plannerStops.length && !rest.length) {
     return next.map((n) => n.company).slice(0, max);
   }

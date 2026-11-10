@@ -123,7 +123,7 @@ type MorePane =
   | "scout"
   | "research";
 type ScoutPane = "brief" | "leads" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
-type TodayMode = "desk" | "truck";
+type TodayMode = "desk" | "car";
 
 const IMPROVE_URL = (() => {
   if (typeof window === "undefined") return "https://turkey-webber.github.io/Cliffscrm/?open=newsletter-improve";
@@ -764,13 +764,13 @@ export default function App() {
   const dayLead = nextList[0] ?? null;
   const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
   const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
-  const truckLead = routeStops[0] ?? dayLead?.company ?? null;
+  const carLead = routeStops[0] ?? dayLead?.company ?? null;
   const showDayBar =
     tab === "today" &&
     !wrapDraft &&
     !captureOpen &&
     !scriptOpen &&
-    (todayMode === "truck" ? !!truckLead : !!dayLead);
+    (todayMode === "car" ? !!carLead : !!dayLead);
 
   const allScoutJobs = useMemo(
     () => mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds()),
@@ -803,7 +803,7 @@ export default function App() {
   const researchFeed = useMemo(() => recentResearchFeed(liveCompanies, 10), [liveCompanies]);
 
   useEffect(() => {
-    if (todayMode !== "truck") return;
+    if (todayMode !== "car") return;
     const stop = routeStops[0];
     if (stop) setActiveId(stop.id);
   }, [todayMode, routeStops[0]?.id]);
@@ -1066,11 +1066,11 @@ export default function App() {
       if (nxt) {
         setActiveId(nxt.company.id);
         setTab("today");
-        // Stay in Truck when driving the loop; Office keeps auto-dial.
-        if (todayMode !== "truck") setTodayMode("desk");
-        if (todayMode !== "truck" && autoDialNext && nxt.company.phone) {
+        // Stay in Car when driving the loop; Office keeps auto-dial.
+        if (todayMode !== "car") setTodayMode("desk");
+        if (todayMode !== "car" && autoDialNext && nxt.company.phone) {
           window.setTimeout(() => dial(nxt.company), 280);
-        } else if (todayMode === "truck") {
+        } else if (todayMode === "car") {
           flash(`Next stop: ${nxt.company.name}`);
         } else if (!nxt.company.phone) {
           flash(`Next: ${nxt.company.name} — no phone`);
@@ -1584,7 +1584,7 @@ export default function App() {
           <p>
             {todayMode === "desk"
               ? "Office — call the Next card; sticky bar does the rest"
-              : "Truck — navigate the loop; Arrived logs the visit"}
+              : "Car — navigate the loop; Arrived logs the visit"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
@@ -1600,11 +1600,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={todayMode === "truck" ? "on" : ""}
-            aria-pressed={todayMode === "truck"}
-            onClick={() => setTodayMode("truck")}
+            className={todayMode === "car" ? "on" : ""}
+            aria-pressed={todayMode === "car"}
+            onClick={() => setTodayMode("car")}
           >
-            Truck
+            Car
           </button>
         </div>
         <div className="day-progress" aria-label="Daily progress">
@@ -1910,9 +1910,9 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <div className="truck-cockpit">
+          <div className="car-cockpit">
             <div className="panel">
-              <h2>Truck loop</h2>
+              <h2>Car loop</h2>
               <p style={{ marginTop: 0 }}>{routeSummary(routeStops)}</p>
               <p className="subtle">From {OFFICE.address}</p>
               {!routeStops.length && (
@@ -1923,7 +1923,7 @@ export default function App() {
               )}
             </div>
             {routeStops[0] && (
-              <div className="hero-call truck-stop">
+              <div className="hero-call car-stop">
                 <p className="eyebrow">
                   Stop 1 of {routeStops.length}
                   {(() => {
@@ -3060,7 +3060,7 @@ export default function App() {
             Auto-dial next after Save &amp; next (default on)
           </label>
           <p className="subtle">
-            Office shows opener, why-now, appointment ask, notes, and comments. Truck switches the sticky
+            Office shows opener, why-now, appointment ask, notes, and comments. Car switches the sticky
             bar to Navigate / Arrived and keeps you on the driving loop after wrap. Optional Grok rewrite
             when <code>GROK_API_KEY</code> is bound on the Cursor host.
           </p>
@@ -3420,7 +3420,7 @@ export default function App() {
               </div>
             </div>
             <div className="panel">
-              <h2>Truck brief</h2>
+              <h2>Car brief</h2>
               {scoutTen.map((j, i) => (
                 <div key={j.id} className="muted" style={{ marginTop: "0.35rem" }}>
                   {i + 1}. <strong>{j.company}</strong> — {j.title} ({j.daysOpen}d)
@@ -4098,8 +4098,8 @@ export default function App() {
           <p className="brand-kicker">Express · Montgomery</p>
           <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            {todayMode === "truck" && truckLead
-              ? `Truck · ${truckLead.name}`
+            {todayMode === "car" && carLead
+              ? `Car · ${carLead.name}`
               : dayLead
                 ? `Next · ${dayLead.company.name}`
                 : "Field desk"}
@@ -4123,20 +4123,20 @@ export default function App() {
 
       <main className="main">{main}</main>
 
-      {showDayBar && (todayMode === "truck" ? truckLead : dayLead) ? (
+      {showDayBar && (todayMode === "car" ? carLead : dayLead) ? (
         <div
           className="day-action-bar"
           role="toolbar"
-          aria-label={todayMode === "truck" ? "Next stop actions" : "Next call actions"}
+          aria-label={todayMode === "car" ? "Next stop actions" : "Next call actions"}
         >
-          {todayMode === "truck" && truckLead ? (
+          {todayMode === "car" && carLead ? (
             <>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
-                  setActiveId(truckLead.id);
-                  openMapsNavigate(truckLead);
+                  setActiveId(carLead.id);
+                  openMapsNavigate(carLead);
                 }}
               >
                 Navigate
@@ -4145,8 +4145,8 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setActiveId(truckLead.id);
-                  if (truckLead.phone) dial(truckLead);
+                  setActiveId(carLead.id);
+                  if (carLead.phone) dial(carLead);
                   else flash("No phone on file");
                 }}
               >
@@ -4156,9 +4156,9 @@ export default function App() {
                 type="button"
                 className="btn btn-accent"
                 onClick={() => {
-                  setActiveId(truckLead.id);
-                  claim(truckLead.id);
-                  openWrap(truckLead, "got_them", "Arrived on site — visit");
+                  setActiveId(carLead.id);
+                  claim(carLead.id);
+                  openWrap(carLead, "got_them", "Arrived on site — visit");
                 }}
               >
                 Arrived
@@ -4167,10 +4167,10 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setActiveId(truckLead.id);
-                  claim(truckLead.id);
+                  setActiveId(carLead.id);
+                  claim(carLead.id);
                   pendingScore.current = null;
-                  openWrap(truckLead, "skip");
+                  openWrap(carLead, "skip");
                 }}
               >
                 Skip

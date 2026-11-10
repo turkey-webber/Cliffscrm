@@ -261,12 +261,12 @@ button.dial-pill {
   color: var(--ink);
 }
 .dial-cockpit { display: flex; flex-direction: column; gap: 0; }
-.truck-cockpit {
+.car-cockpit {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
 }
-.truck-stop .eyebrow {
+.car-stop .eyebrow {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-size: 0.72rem;

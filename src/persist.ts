@@ -18,7 +18,7 @@ export type Persisted = {
   wrapUps: WrapUp[];
   captures: CaptureItem[];
   mpc: MpcCandidate[];
-  todayMode: "desk" | "truck";
+  todayMode: "desk" | "car";
   newsletterPrefs: NewsletterPrefs;
   /** Seen Gmail/Drive/local drop resume keys to avoid re-ingest */
   mpcSeenIds: string[];
@@ -66,7 +66,8 @@ export function loadState(): Persisted {
       wrapUps: Array.isArray(parsed.wrapUps) ? parsed.wrapUps : [],
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
       mpc: Array.isArray(parsed.mpc) ? parsed.mpc : [],
-      todayMode: parsed.todayMode === "truck" ? "truck" : "desk",
+      todayMode:
+        parsed.todayMode === "car" || (parsed.todayMode as string) === "truck" ? "car" : "desk",
       autoDialNext: parsed.autoDialNext !== false,
       newsletterPrefs: {
         ...DEFAULT_NEWSLETTER_PREFS,
