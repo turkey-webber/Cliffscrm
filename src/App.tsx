@@ -45,6 +45,12 @@ import {
 } from "./newsletter";
 import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import {
+  applyDossierToCompany,
+  buildCompanyDossier,
+  enrichDossierWithGrok,
+  type CompanyDossier,
+} from "./dossier";
 import { buildJobOrderLeads, leadSourceLabel, recentResearchFeed } from "./leads";
 import {
   DEFAULT_SCOUT_PREFS,
@@ -107,7 +113,8 @@ type MorePane =
   | "hits"
   | "priority"
   | "daily"
-  | "scout";
+  | "scout"
+  | "research";
 type ScoutPane = "brief" | "leads" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
 type TodayMode = "desk" | "truck";
 
@@ -615,6 +622,8 @@ export default function App() {
   const [scoutPaste, setScoutPaste] = useState("");
   const [scoutQuery, setScoutQuery] = useState("");
   const [scoutCalDay, setScoutCalDay] = useState(todayIso());
+  const [dossierById, setDossierById] = useState<Record<string, CompanyDossier>>({});
+  const [dossierBusy, setDossierBusy] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [copySheet, setCopySheet] = useState<string | null>(null);
   const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
@@ -1136,14 +1145,65 @@ export default function App() {
     flash("Nearby stop added — Q4 appointments not moved");
   }
 
+  async function buildDossierFor(c: Company, enrich: boolean) {
+    setDossierBusy(c.id);
+    try {
+      let d = buildCompanyDossier(c);
+      if (enrich) d = await enrichDossierWithGrok(c, d);
+      setDossierById((prev) => ({ ...prev, [c.id]: d }));
+      setCompanies((prev) => prev.map((row) => (row.id === c.id ? applyDossierToCompany(row, d) : row)));
+      flash(
+        enrich
+          ? `Dossier ${d.completeness}% · ${d.provider}${d.collectNext.length ? ` · ${d.collectNext.length} gaps` : ""}`
+          : `Dossier ${d.completeness}% · app`,
+      );
+      return d;
+    } finally {
+      setDossierBusy(null);
+    }
+  }
+
+  async function researchWholeBook(enrich: boolean) {
+    const list = liveCompanies.filter((c) => c.blitzState !== "dnc");
+    if (!list.length) {
+      flash("No companies in book");
+      return;
+    }
+    setDossierBusy("book");
+    let n = 0;
+    try {
+      for (const c of list) {
+        let d = buildCompanyDossier(c);
+        if (enrich) d = await enrichDossierWithGrok(c, d);
+        setDossierById((prev) => ({ ...prev, [c.id]: d }));
+        setCompanies((prev) => prev.map((row) => (row.id === c.id ? applyDossierToCompany(row, d) : row)));
+        n++;
+      }
+      flash(`Research book · ${n} dossiers${enrich ? " (Grok where available)" : ""}`);
+    } finally {
+      setDossierBusy(null);
+    }
+  }
+
   function applyImportResult(result: Awaited<ReturnType<typeof ingestBrowserFiles>>) {
-    setCompanies(result.companies);
+    const withDossiers = result.companies.map((c) => {
+      if (c.blitzState === "dnc") return c;
+      const d = buildCompanyDossier(c);
+      return applyDossierToCompany(c, d);
+    });
+    const dossierMap: Record<string, CompanyDossier> = {};
+    for (const c of withDossiers) {
+      if (c.blitzState === "dnc") continue;
+      dossierMap[c.id] = buildCompanyDossier(c);
+    }
+    setCompanies(withDossiers);
+    setDossierById((prev) => ({ ...prev, ...dossierMap }));
     setImportLog(result.log);
     setRecall((prev) => upsertRecallFiles(prev, result.files, result.facts, result.log));
-    if (result.companies[0]) setActiveId(result.companies[0].id);
+    if (withDossiers[0]) setActiveId(withDossiers[0].id);
     flash(
       result.imported
-        ? `Imported ${result.imported} · pruned ${result.pruned} older`
+        ? `Imported ${result.imported} · pruned ${result.pruned} older · dossiers built`
         : result.facts.length
           ? `Stored ${result.facts.length} recall fact(s)`
           : "Nothing new to import",
@@ -1647,24 +1707,31 @@ export default function App() {
                   {suggestBusy ? "Refreshing…" : dialSuggestions?.provider === "grok" ? "Grok + app" : "App"}
                 </span>
               </div>
-              {(dialSuggestions || suggestFor(lead.company)).blocks
+                  {(dialSuggestions || suggestFor(lead.company)).blocks
                 .filter((b) => b.id === "opener" || b.id === "why" || b.id === "ask" || b.id === "desk")
-                .map((b) => (
+                .map((b) => {
+                  const dossierOpener =
+                    b.id === "opener"
+                      ? dossierById[lead.company.id]?.weinbergOpener || buildCompanyDossier(lead.company).weinbergOpener
+                      : null;
+                  const body = dossierOpener || b.body;
+                  return (
                   <div key={b.id} className="suggest-block">
                     <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
-                      <strong>{b.title}</strong>
+                      <strong>{b.title}{dossierOpener ? " · Weinberg" : ""}</strong>
                       <button
                         type="button"
                         className="btn btn-ghost"
                         style={{ padding: "0.25rem 0.55rem", fontSize: "0.75rem" }}
-                        onClick={() => void copyText(b.body, b.title)}
+                        onClick={() => void copyText(body, b.title)}
                       >
                         Copy
                       </button>
                     </div>
-                    <p>{b.body}</p>
+                    <p>{body}</p>
                   </div>
-                ))}
+                  );
+                })}
               <details className="suggest-objections">
                 <summary>Objections</summary>
                 {(dialSuggestions || suggestFor(lead.company)).objections.map((o) => (
@@ -2385,9 +2452,134 @@ export default function App() {
           )}
         </div>
         <div className="card">
-          <h2>Research</h2>
+          <h2>Research dossier</h2>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Decision makers, postings, hiring signals, relationship history, shifts/vendors/approvers when
+            on file — never invented. Weinberg opener from verified facts.
+          </p>
+          <div className="row wrap" style={{ gap: "0.45rem" }}>
+            <button
+              className="btn btn-primary"
+              disabled={dossierBusy === active.id}
+              onClick={() => void buildDossierFor(active, false)}
+            >
+              {dossierBusy === active.id ? "Building…" : "Build from book"}
+            </button>
+            <button
+              className="btn btn-ghost"
+              disabled={dossierBusy === active.id}
+              onClick={() => void buildDossierFor(active, true)}
+            >
+              Enrich with Grok
+            </button>
+          </div>
+          {(() => {
+            const d = dossierById[active.id] || buildCompanyDossier(active);
+            return (
+              <div style={{ marginTop: "0.75rem" }}>
+                <div className="subtle">
+                  {d.completeness}% filled · {d.provider}
+                  {d.builtAt
+                    ? ` · ${new Date(d.builtAt).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT`
+                    : ""}
+                </div>
+                <h3 style={{ marginTop: "0.65rem" }}>Staffing bio</h3>
+                <p>{d.staffingBio}</p>
+                <h3>Weinberg opener</h3>
+                <p>{d.weinbergOpener}</p>
+                <button
+                  className="btn btn-ghost btn-block"
+                  onClick={() => void copyText(d.weinbergOpener, "Weinberg opener")}
+                >
+                  Copy opener
+                </button>
+                <h3>Decision makers</h3>
+                {!d.decisionMakers.length && <p className="empty">Not on file</p>}
+                {d.decisionMakers.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text} <span className="subtle">· {f.source}</span>
+                  </div>
+                ))}
+                <h3>Current postings</h3>
+                {!d.currentPostings.length && <p className="empty">Not on file</p>}
+                {d.currentPostings.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Previous postings</h3>
+                {!d.previousPostings.length && <p className="empty">Not on file</p>}
+                {d.previousPostings.slice(0, 6).map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                    {f.date ? ` (${f.date})` : ""}
+                  </div>
+                ))}
+                <h3>Hiring signals</h3>
+                {!d.hiringSignals.length && <p className="empty">Not on file</p>}
+                {d.hiringSignals.slice(0, 8).map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Business changes</h3>
+                {!d.businessChanges.length && <p className="empty">Not on file</p>}
+                {d.businessChanges.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Relationship history</h3>
+                {!d.relationshipHistory.length && <p className="empty">Not on file</p>}
+                {d.relationshipHistory.slice(0, 8).map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Shifts</h3>
+                {!d.shiftSchedules.length && <p className="empty">Not on file — ask on call</p>}
+                {d.shiftSchedules.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Staffing vendors</h3>
+                {!d.staffingVendors.length && <p className="empty">Not on file — ask on call</p>}
+                {d.staffingVendors.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Who approves hiring</h3>
+                {!d.hiringApprovers.length && <p className="empty">Not on file — ask on call</p>}
+                {d.hiringApprovers.map((f) => (
+                  <div key={f.text} className="muted" style={{ marginTop: "0.25rem" }}>
+                    {f.text}
+                  </div>
+                ))}
+                <h3>Collect next</h3>
+                {!d.collectNext.length ? (
+                  <p className="muted">Core fields covered from book data.</p>
+                ) : (
+                  <ul className="research-list">
+                    {d.collectNext.map((g) => (
+                      <li key={g}>{g}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="row wrap" style={{ marginTop: "0.65rem" }}>
+                  {d.researchLinks.slice(0, 8).map((l) => (
+                    <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                      {l.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          <h3 style={{ marginTop: "1rem" }}>Raw research rows</h3>
           {active.research.length === 0 ? (
-            <p>No research yet</p>
+            <p className="empty">No research yet</p>
           ) : (
             active.research.map((r, i) => (
               <div key={i} style={{ marginTop: "0.55rem" }}>
@@ -2398,13 +2590,6 @@ export default function App() {
               </div>
             ))
           )}
-          <div className="row wrap" style={{ marginTop: "0.65rem" }}>
-            {researchLinksFor(active.name).slice(0, 8).map((l) => (
-              <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
-                {l.label}
-              </a>
-            ))}
-          </div>
         </div>
         <div className="card">
           <h2>Q4 smart copy</h2>
@@ -2752,6 +2937,82 @@ export default function App() {
             newsletter APIs; Pages is the public static mirror (book stays in your browser).
           </p>
         </div>
+      </>
+    );
+  } else if (morePane === "research") {
+    const rows = liveCompanies.filter((c) => c.blitzState !== "dnc");
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Research book</h1>
+          <p>
+            Dossier every company: DMs, postings, hiring signals, bio, relationship history, gaps, Weinberg
+            opener — verified facts only
+          </p>
+        </div>
+        <div className="card">
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Builds from Q4 book, notes, timeline, Drop research, ZoomInfo, and Scout. Missing shifts,
+            vendors, and approvers stay “Not on file” until you capture them. Grok only rewrites from the
+            snapshot — never invents.
+          </p>
+          <div className="row wrap" style={{ gap: "0.45rem" }}>
+            <button
+              className="btn btn-primary"
+              disabled={dossierBusy === "book"}
+              onClick={() => void researchWholeBook(false)}
+            >
+              {dossierBusy === "book" ? "Building…" : `Build all (${rows.length})`}
+            </button>
+            <button
+              className="btn btn-ghost"
+              disabled={dossierBusy === "book"}
+              onClick={() => void researchWholeBook(true)}
+            >
+              Build + Grok enrich
+            </button>
+          </div>
+        </div>
+        {rows.slice(0, 60).map((c) => {
+          const d = dossierById[c.id];
+          return (
+            <div key={c.id} className="card" style={{ marginBottom: "0.45rem" }}>
+              <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                <div>
+                  <strong>{c.name}</strong>
+                  <div className="subtle">
+                    {d ? `${d.completeness}% · ${d.provider}` : "No dossier yet"}
+                    {c.contactName ? ` · ${c.contactName}` : ""}
+                  </div>
+                  {d?.collectNext?.[0] ? (
+                    <div className="muted">Next: {d.collectNext[0]}</div>
+                  ) : null}
+                </div>
+                <div className="stack">
+                  <button
+                    className="btn btn-primary"
+                    disabled={!!dossierBusy}
+                    onClick={() => void buildDossierFor(c, false)}
+                  >
+                    Build
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setActiveId(c.id);
+                      setMorePane("company");
+                    }}
+                  >
+                    Open
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </>
     );
   } else if (morePane === "scout") {
@@ -3648,6 +3909,9 @@ export default function App() {
             }}
           >
             Scout Desk <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("research")}>
+            Research book <span>→</span>
           </button>
           <button className="menu-link" onClick={() => setMorePane("hot")}>
             Hot Sheet <span>→</span>
