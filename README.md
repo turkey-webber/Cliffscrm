@@ -30,3 +30,5 @@ GitHub Pages cannot run the Drive sync or Gmail newsletter APIs. Enable **Settin
 ## Publish (Cursor)
 
 Commit to `turkey-webber/Cliffscrm` and publish from a Cursor agent attached to that repo when you want the live API host.
+
+Pages source is **GitHub Actions** on `main`.
