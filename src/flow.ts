@@ -144,18 +144,92 @@ export function buildNextList(companies: Company[], wrapUps: WrapUp[] = []): Nex
   );
 }
 
-/** Shared route: up to 8 visit/appt stops from the same Next list, office origin. */
+export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 3958.8;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+export function milesFromOffice(c: Company): number | null {
+  if (c.lat == null || c.lng == null) return null;
+  return Math.round(haversineMiles(OFFICE.lat, OFFICE.lng, c.lat, c.lng) * 10) / 10;
+}
+
+/** Nearest-neighbor from origin using coords when present; address-only stops keep input order after geo. */
+export function orderRouteNearest(stops: Company[], originLat = OFFICE.lat, originLng = OFFICE.lng): Company[] {
+  const remaining = [...stops];
+  const ordered: Company[] = [];
+  let lat = originLat;
+  let lng = originLng;
+  while (remaining.length) {
+    let bestIdx = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i];
+      if (c.lat == null || c.lng == null) continue;
+      const d = haversineMiles(lat, lng, c.lat, c.lng);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    // If nobody has coords, append the rest in place order
+    if (!Number.isFinite(bestDist) || bestDist === Number.POSITIVE_INFINITY) {
+      ordered.push(...remaining);
+      break;
+    }
+    const [next] = remaining.splice(bestIdx, 1);
+    ordered.push(next);
+    if (next.lat != null && next.lng != null) {
+      lat = next.lat;
+      lng = next.lng;
+    }
+  }
+  return ordered;
+}
+
+/**
+ * Shared truck route: up to `max` stops from the same Next list.
+ * Planner visit/appt stops keep Sales Planner order at the front (Q4 sacred);
+ * other Next stops with a place are nearest-neighbor after that (office → loop).
+ */
 export function buildRouteStops(next: NextItem[], max = 8): Company[] {
-  const visits = next.filter((n) => n.motion === "visit" || n.motion === "appt");
-  const pool = visits.length ? visits : next;
-  const withAddress = pool.map((n) => n.company).filter((c) => (c.lat && c.lng) || c.address || c.city);
-  const ordered = withAddress.length ? withAddress : pool.map((n) => n.company);
-  return ordered.slice(0, max);
+  const visitItems = next.filter((n) => n.motion === "visit" || n.motion === "appt");
+  const plannerStops = visitItems
+    .filter((n) => n.company.plannerOrder != null)
+    .sort((a, b) => (a.company.plannerOrder ?? 9999) - (b.company.plannerOrder ?? 9999))
+    .map((n) => n.company);
+  const lockedIds = new Set(plannerStops.map((c) => c.id));
+
+  const rest: Company[] = [];
+  const seen = new Set(lockedIds);
+  for (const n of next) {
+    const c = n.company;
+    if (seen.has(c.id)) continue;
+    if (!((c.lat && c.lng) || c.address || c.city)) continue;
+    seen.add(c.id);
+    rest.push(c);
+  }
+  // If nothing has a place yet, still surface ranked Next names so Truck isn't empty.
+  if (!plannerStops.length && !rest.length) {
+    return next.map((n) => n.company).slice(0, max);
+  }
+
+  const last = plannerStops[plannerStops.length - 1];
+  const optimizedRest = orderRouteNearest(rest, last?.lat ?? OFFICE.lat, last?.lng ?? OFFICE.lng);
+  return [...plannerStops, ...optimizedRest].slice(0, max);
 }
 
 export function routeSummary(stops: Company[]): string {
-  if (!stops.length) return "No route yet. Plan today’s loop from the ranked list.";
-  return `Today’s loop · ${stops.length} stop${stops.length === 1 ? "" : "s"} · from ${OFFICE.address}`;
+  if (!stops.length) return "No route yet — Sync Drop or add planner visits with an address.";
+  const withMi = stops.map(milesFromOffice).filter((n): n is number => n != null);
+  const miBit = withMi.length ? ` · ~${withMi.reduce((a, b) => a + b, 0).toFixed(0)} mi marked` : "";
+  return `Today’s loop · ${stops.length} stop${stops.length === 1 ? "" : "s"} · from office${miBit}`;
 }
 
 export function companyMapsQuery(c: Company): string {

@@ -11,7 +11,14 @@ import {
   type Company,
   type Dialer,
 } from "./data";
-import { buildNextList, buildRouteStops, companyMapsQuery, routeSummary, toDialToday } from "./flow";
+import {
+  buildNextList,
+  buildRouteStops,
+  companyMapsQuery,
+  milesFromOffice,
+  routeSummary,
+  toDialToday,
+} from "./flow";
 import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
@@ -151,8 +158,13 @@ function appleMapsUrl(c: Company): string {
   return `https://maps.apple.com/?saddr=${saddr}&daddr=${daddr}&dirflg=d`;
 }
 
-function googleMapsStopUrl(c: Company): string {
-  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(OFFICE.address)}&destination=${encodeURIComponent(companyMapsQuery(c))}`;
+function googleMapsStopUrl(c: Company, from?: Company | null): string {
+  const origin = from ? companyMapsQuery(from) : OFFICE.address;
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(companyMapsQuery(c))}`;
+}
+
+function openMapsNavigate(c: Company, from?: Company | null) {
+  window.open(googleMapsStopUrl(c, from), "_blank", "noopener,noreferrer");
 }
 
 function resultFromWrap(draft: WrapUp): CallResult {
@@ -752,7 +764,13 @@ export default function App() {
   const dayLead = nextList[0] ?? null;
   const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
   const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
-  const showDayBar = tab === "today" && !!dayLead && !wrapDraft && !captureOpen && !scriptOpen;
+  const truckLead = routeStops[0] ?? dayLead?.company ?? null;
+  const showDayBar =
+    tab === "today" &&
+    !wrapDraft &&
+    !captureOpen &&
+    !scriptOpen &&
+    (todayMode === "truck" ? !!truckLead : !!dayLead);
 
   const allScoutJobs = useMemo(
     () => mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds()),
@@ -783,6 +801,12 @@ export default function App() {
     [liveCompanies, allScoutJobs],
   );
   const researchFeed = useMemo(() => recentResearchFeed(liveCompanies, 10), [liveCompanies]);
+
+  useEffect(() => {
+    if (todayMode !== "truck") return;
+    const stop = routeStops[0];
+    if (stop) setActiveId(stop.id);
+  }, [todayMode, routeStops[0]?.id]);
 
   useEffect(() => {
     const c = dayLead?.company;
@@ -926,6 +950,7 @@ export default function App() {
   }
 
   function openWrap(c: Company, outcome: WrapOutcome, prefill = "") {
+    const onSite = /\barrived\b|\bon[- ]?site\b|\bvisit\b/i.test(prefill);
     setWrapDraft(
       blankWrapUp({
         companyId: c.id,
@@ -936,7 +961,7 @@ export default function App() {
         outcome,
         leftMessage: outcome === "voicemail" ? "yes" : "",
         otherResults: prefill,
-        callType: "Other call - telephone",
+        callType: onSite ? "Other call - face to face" : "Other call - telephone",
       }),
     );
   }
@@ -1021,7 +1046,12 @@ export default function App() {
       }
       setCallsDone((n) => n + 1);
     }
-    if (draft.resultGoals.includes("Appointment Set")) setVisitsDone((n) => n + 1);
+    const visitCounted =
+      draft.resultGoals.includes("Appointment Set") ||
+      draft.resultGoals.includes("Client Facility Tour") ||
+      /face\s*to\s*face/i.test(draft.callType) ||
+      /\barrived\b|\bon[- ]?site\b|\bvisit\b/i.test(`${draft.otherResults} ${draft.otherGoals}`);
+    if (visitCounted) setVisitsDone((n) => n + 1);
     if (draft.captureId) {
       setCaptures((prev) =>
         prev.map((cap) => (cap.id === draft.captureId ? { ...cap, status: "done" as const } : cap)),
@@ -1036,9 +1066,12 @@ export default function App() {
       if (nxt) {
         setActiveId(nxt.company.id);
         setTab("today");
-        setTodayMode("desk");
-        if (autoDialNext && nxt.company.phone) {
+        // Stay in Truck when driving the loop; Office keeps auto-dial.
+        if (todayMode !== "truck") setTodayMode("desk");
+        if (todayMode !== "truck" && autoDialNext && nxt.company.phone) {
           window.setTimeout(() => dial(nxt.company), 280);
+        } else if (todayMode === "truck") {
+          flash(`Next stop: ${nxt.company.name}`);
         } else if (!nxt.company.phone) {
           flash(`Next: ${nxt.company.name} — no phone`);
         } else {
@@ -1549,16 +1582,28 @@ export default function App() {
         <div className="section-head">
           <h1>Today</h1>
           <p>
-            {todayMode === "desk" ? "Call the Next card — sticky bar does the rest" : "Drive the loop — maps on each stop"}
+            {todayMode === "desk"
+              ? "Office — call the Next card; sticky bar does the rest"
+              : "Truck — navigate the loop; Arrived logs the visit"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
         </div>
         <div className="segment" role="tablist" aria-label="Today mode">
-          <button type="button" className={todayMode === "desk" ? "on" : ""} onClick={() => setTodayMode("desk")}>
-            Desk
+          <button
+            type="button"
+            className={todayMode === "desk" ? "on" : ""}
+            aria-pressed={todayMode === "desk"}
+            onClick={() => setTodayMode("desk")}
+          >
+            Office
           </button>
-          <button type="button" className={todayMode === "truck" ? "on" : ""} onClick={() => setTodayMode("truck")}>
+          <button
+            type="button"
+            className={todayMode === "truck" ? "on" : ""}
+            aria-pressed={todayMode === "truck"}
+            onClick={() => setTodayMode("truck")}
+          >
             Truck
           </button>
         </div>
@@ -1865,49 +1910,152 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <div className="panel">
-            <h2>Truck</h2>
-            <p>{routeSummary(routeStops)}</p>
-            {!routeStops.length && (
-              <p className="empty">No route yet. Ranked visits appear here when planner/coords exist.</p>
-            )}
-            {routeStops.map((c, i) => (
-              <div key={c.id} className="list-item">
-                <strong className="mono">{i + 1}</strong>
-                <div style={{ flex: 1 }}>
-                  <strong>{c.name}</strong>
-                  <div className="muted">
-                    {[c.address, c.city].filter(Boolean).join(", ") || "Address missing"}
-                    {c.phone ? ` · ${c.phone}` : ""}
-                  </div>
-                  <div className="row wrap" style={{ marginTop: "0.45rem" }}>
-                    <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
-                      Apple
-                    </a>
-                    <a className="btn btn-ghost" href={googleMapsStopUrl(c)} target="_blank" rel="noreferrer">
-                      Google
-                    </a>
-                  </div>
+          <div className="truck-cockpit">
+            <div className="panel">
+              <h2>Truck loop</h2>
+              <p style={{ marginTop: 0 }}>{routeSummary(routeStops)}</p>
+              <p className="subtle">From {OFFICE.address}</p>
+              {!routeStops.length && (
+                <p className="empty">
+                  No drive stops yet. Sync Sales Planner visits or add addresses on Today accounts — same
+                  ranked list as Office.
+                </p>
+              )}
+            </div>
+            {routeStops[0] && (
+              <div className="hero-call truck-stop">
+                <p className="eyebrow">
+                  Stop 1 of {routeStops.length}
+                  {(() => {
+                    const mi = milesFromOffice(routeStops[0]);
+                    return mi != null ? ` · ${mi} mi from office` : "";
+                  })()}
+                </p>
+                <h2>{routeStops[0].name}</h2>
+                <p>
+                  {[routeStops[0].address, routeStops[0].city].filter(Boolean).join(", ") || "Address missing"}
+                  {routeStops[0].contactName ? ` · ${routeStops[0].contactName}` : ""}
+                </p>
+                <p className="dial-phone mono">{routeStops[0].phone || "No phone on file"}</p>
+                <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-lg"
+                    style={{ flex: 1, minWidth: "8rem" }}
+                    onClick={() => {
+                      setActiveId(routeStops[0].id);
+                      openMapsNavigate(routeStops[0]);
+                    }}
+                  >
+                    Navigate
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-accent"
+                    onClick={() => {
+                      setActiveId(routeStops[0].id);
+                      claim(routeStops[0].id);
+                      openWrap(routeStops[0], "got_them", "Arrived on site — visit");
+                    }}
+                  >
+                    Arrived
+                  </button>
                 </div>
-                <div className="stack">
-                  <button className="btn btn-primary" onClick={() => dial(c)}>
-                    Call
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => openWrap(c, "got_them")}>
-                    Wrap
-                  </button>
+                <div className="row wrap" style={{ marginTop: "0.5rem", gap: "0.45rem" }}>
+                  <a className="btn btn-ghost" href={appleMapsUrl(routeStops[0])} target="_blank" rel="noreferrer">
+                    Apple Maps
+                  </a>
+                  <a
+                    className="btn btn-ghost"
+                    href={googleMapsStopUrl(routeStops[0])}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Google Maps
+                  </a>
+                  {routeStops[0].phone ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setActiveId(routeStops[0].id);
+                        dial(routeStops[0]);
+                      }}
+                    >
+                      Call ahead
+                    </button>
+                  ) : null}
                 </div>
               </div>
-            ))}
+            )}
+            {routeStops.length > 1 && (
+              <div className="panel">
+                <h2>Up next on loop</h2>
+                {routeStops.slice(1).map((c, i) => {
+                  const prev = routeStops[i];
+                  const mi = milesFromOffice(c);
+                  return (
+                    <div key={c.id} className="list-item">
+                      <strong className="mono">{i + 2}</strong>
+                      <div style={{ flex: 1 }}>
+                        <strong>{c.name}</strong>
+                        <div className="muted">
+                          {[c.address, c.city].filter(Boolean).join(", ") || "Address missing"}
+                          {mi != null ? ` · ${mi} mi from office` : ""}
+                          {c.phone ? ` · ${c.phone}` : ""}
+                        </div>
+                        <div className="row wrap" style={{ marginTop: "0.45rem" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => {
+                              setActiveId(c.id);
+                              openMapsNavigate(c, prev);
+                            }}
+                          >
+                            Navigate
+                          </button>
+                          <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
+                            Apple
+                          </a>
+                        </div>
+                      </div>
+                      <div className="stack">
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => {
+                            setActiveId(c.id);
+                            if (c.phone) dial(c);
+                            else openWrap(c, "got_them");
+                          }}
+                        >
+                          {c.phone ? "Call" : "Wrap"}
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => {
+                            setActiveId(c.id);
+                            claim(c.id);
+                            openWrap(c, "got_them", "Arrived on site — visit");
+                          }}
+                        >
+                          Arrived
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {!!routeStops.length && (
               <a
                 className="btn btn-primary btn-block btn-lg"
-                style={{ marginTop: "0.75rem", textDecoration: "none" }}
+                style={{ marginTop: "0.35rem", textDecoration: "none" }}
                 href={mapsUrl(routeStops)}
                 target="_blank"
                 rel="noreferrer"
               >
-                Open loop in Google Maps
+                Open full loop in Google Maps
               </a>
             )}
           </div>
@@ -2912,8 +3060,9 @@ export default function App() {
             Auto-dial next after Save &amp; next (default on)
           </label>
           <p className="subtle">
-            Desk shows opener, why-now, appointment ask, notes, and comments. Optional Grok rewrite when{" "}
-            <code>GROK_API_KEY</code> is bound on the Cursor host.
+            Office shows opener, why-now, appointment ask, notes, and comments. Truck switches the sticky
+            bar to Navigate / Arrived and keeps you on the driving loop after wrap. Optional Grok rewrite
+            when <code>GROK_API_KEY</code> is bound on the Cursor host.
           </p>
         </div>
         <div className="card">
@@ -3949,7 +4098,11 @@ export default function App() {
           <p className="brand-kicker">Express · Montgomery</p>
           <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            {dayLead ? `Next · ${dayLead.company.name}` : "Field desk"}
+            {todayMode === "truck" && truckLead
+              ? `Truck · ${truckLead.name}`
+              : dayLead
+                ? `Next · ${dayLead.company.name}`
+                : "Field desk"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
@@ -3970,52 +4123,107 @@ export default function App() {
 
       <main className="main">{main}</main>
 
-      {showDayBar && dayLead ? (
-        <div className="day-action-bar" role="toolbar" aria-label="Next call actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              setActiveId(dayLead.company.id);
-              dial(dayLead.company);
-            }}
-          >
-            Call
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => {
-              setActiveId(dayLead.company.id);
-              claim(dayLead.company.id);
-              pendingScore.current = { result: "voicemail", points: 0 };
-              openWrap(dayLead.company, "voicemail");
-            }}
-          >
-            VM
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => {
-              setActiveId(dayLead.company.id);
-              claim(dayLead.company.id);
-              pendingScore.current = null;
-              openWrap(dayLead.company, "skip");
-            }}
-          >
-            Skip
-          </button>
-          <button
-            type="button"
-            className="btn btn-accent"
-            onClick={() => {
-              setActiveId(dayLead.company.id);
-              openWrap(dayLead.company, "got_them");
-            }}
-          >
-            Wrap
-          </button>
+      {showDayBar && (todayMode === "truck" ? truckLead : dayLead) ? (
+        <div
+          className="day-action-bar"
+          role="toolbar"
+          aria-label={todayMode === "truck" ? "Next stop actions" : "Next call actions"}
+        >
+          {todayMode === "truck" && truckLead ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setActiveId(truckLead.id);
+                  openMapsNavigate(truckLead);
+                }}
+              >
+                Navigate
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setActiveId(truckLead.id);
+                  if (truckLead.phone) dial(truckLead);
+                  else flash("No phone on file");
+                }}
+              >
+                Call
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  setActiveId(truckLead.id);
+                  claim(truckLead.id);
+                  openWrap(truckLead, "got_them", "Arrived on site — visit");
+                }}
+              >
+                Arrived
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setActiveId(truckLead.id);
+                  claim(truckLead.id);
+                  pendingScore.current = null;
+                  openWrap(truckLead, "skip");
+                }}
+              >
+                Skip
+              </button>
+            </>
+          ) : dayLead ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setActiveId(dayLead.company.id);
+                  dial(dayLead.company);
+                }}
+              >
+                Call
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setActiveId(dayLead.company.id);
+                  claim(dayLead.company.id);
+                  pendingScore.current = { result: "voicemail", points: 0 };
+                  openWrap(dayLead.company, "voicemail");
+                }}
+              >
+                VM
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setActiveId(dayLead.company.id);
+                  claim(dayLead.company.id);
+                  pendingScore.current = null;
+                  openWrap(dayLead.company, "skip");
+                }}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  setActiveId(dayLead.company.id);
+                  openWrap(dayLead.company, "got_them");
+                }}
+              >
+                Wrap
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
 
