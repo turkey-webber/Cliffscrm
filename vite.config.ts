@@ -43,7 +43,11 @@ function localApiPlugin(): Plugin {
   };
 }
 
+/** GitHub Pages project site lives at /Cliffscrm/; Cursor/local stay at /. */
+const pagesBase = process.env.GITHUB_PAGES === "true" ? "/Cliffscrm/" : "/";
+
 export default defineConfig({
+  base: pagesBase,
   plugins: [react(), localApiPlugin()],
   optimizeDeps: {
     include: ["xlsx", "mammoth"],

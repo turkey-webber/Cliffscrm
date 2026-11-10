@@ -1020,21 +1020,22 @@ export default function App() {
 
   if (tab === "today") {
     const deskItems = nextList;
+    const lead = deskItems[0];
     main = (
       <>
         <div className="section-head">
           <h1>Today</h1>
           <p>
-            To dial today: <strong className="mono">{toDialCount}</strong>
-            {inbox.length ? ` · ${inbox.length} capture inbox` : ""}
+            Meetings first, then callbacks, then planner calls
+            {inbox.length ? ` · ${inbox.length} in capture inbox` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
         </div>
-        <div className="row wrap" style={{ marginBottom: "0.85rem" }}>
-          <button className={`chip ${todayMode === "desk" ? "chip-active" : ""}`} onClick={() => setTodayMode("desk")}>
+        <div className="segment" role="tablist" aria-label="Today mode">
+          <button type="button" className={todayMode === "desk" ? "on" : ""} onClick={() => setTodayMode("desk")}>
             Desk
           </button>
-          <button className={`chip ${todayMode === "truck" ? "chip-active" : ""}`} onClick={() => setTodayMode("truck")}>
+          <button type="button" className={todayMode === "truck" ? "on" : ""} onClick={() => setTodayMode("truck")}>
             Truck
           </button>
         </div>
@@ -1042,7 +1043,7 @@ export default function App() {
           <div className="demo-banner">
             Import Contact Summary + Sales Planner to build the ranked Next list.
             <button
-              className="btn btn-primary btn-block"
+              className="btn btn-accent btn-block"
               style={{ marginTop: "0.65rem" }}
               onClick={() => {
                 setTab("more");
@@ -1053,26 +1054,42 @@ export default function App() {
             </button>
           </div>
         )}
-        <div className="card">
+        {todayMode === "desk" && lead && (
+          <div className="hero-call">
+            <p className="eyebrow">Next · {lead.motion}</p>
+            <h2>{lead.company.name}</h2>
+            <p>
+              {lead.why}
+              {lead.company.phone ? ` · ${lead.company.phone}` : " · No phone"}
+            </p>
+            <div className="row" style={{ marginTop: "0.85rem" }}>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => dial(lead.company)}>
+                Call
+              </button>
+              <button
+                className="btn btn-ghost"
+                style={{ flex: 1, color: "#eef5ef", borderColor: "#3a4a42" }}
+                onClick={() => openWrap(lead.company, "got_them")}
+              >
+                Wrap
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="panel">
           <p className="subtle" style={{ marginTop: 0 }}>
-            Backbone
-          </p>
-          <p>
-            <strong>Contact Summary</strong> · {csFile ? `${csFile.name} · ${bookCount}` : "Not imported"}
-          </p>
-          <p>
-            <strong>Sales Planner</strong> · {plannerFile ? plannerFile.name : "Not imported"}
+            Backbone · CS {csFile ? `${bookCount} in book` : "missing"} · Planner{" "}
+            {plannerFile ? "loaded" : "missing"}
           </p>
           <p className="subtle">{importLog}</p>
         </div>
         {todayMode === "desk" ? (
-          <div className="card">
-            <h2>Next</h2>
-            <p>Meetings first, then callbacks, then planner calls — one shared list.</p>
+          <div className="panel">
+            <h2>Queue</h2>
             {!deskItems.length && (
               <p className="empty">{liveCompanies.length ? "Nothing waiting" : "Import Contact Summary + Sales Planner first."}</p>
             )}
-            {deskItems.slice(0, 25).map((item) => (
+            {deskItems.slice(lead ? 1 : 0, 25).map((item) => (
               <div key={item.company.id} className="list-item">
                 <div style={{ flex: 1 }}>
                   <strong>
@@ -1097,7 +1114,7 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <div className="card">
+          <div className="panel">
             <h2>Truck</h2>
             <p>{routeSummary(routeStops)}</p>
             {!routeStops.length && (
@@ -1810,12 +1827,17 @@ export default function App() {
           </p>
           <p className="subtle">{routeSummary(routeStops)}</p>
         </div>
-        <div className="card">
+        <div className="panel-box">
           <h2>Hosting</h2>
           <p>
-            Source is already on GitHub (<code>turkey-webber/Cliffscrm</code>). The live desk is Cursor-hosted as{" "}
-            <strong>cliffscrm</strong>. GitHub Pages can serve the static build as a second host if you want a
-            public mirror — say the word and we can wire Actions.
+            <strong>GitHub Pages</strong> (static desk):{" "}
+            <a href="https://turkey-webber.github.io/Cliffscrm/" target="_blank" rel="noreferrer">
+              turkey-webber.github.io/Cliffscrm
+            </a>
+          </p>
+          <p className="subtle">
+            Source repo: github.com/turkey-webber/Cliffscrm. Cursor-hosted cliffscrm still runs Drive sync +
+            newsletter APIs; Pages is the public static mirror (book stays in your browser).
           </p>
         </div>
       </>
@@ -1889,18 +1911,18 @@ export default function App() {
           <h1>More</h1>
           <p>Montgomery desk · {OFFICE.agentName}</p>
         </div>
-        <div className="card stack">
-          <button className="btn btn-primary btn-lg btn-block" onClick={() => setMorePane("blitz")}>
-            Team desk / Blitz
+        <div className="panel">
+          <button className="menu-link" onClick={() => setMorePane("blitz")}>
+            Team desk / Blitz <span>→</span>
           </button>
-          <button className="btn btn-accent btn-lg btn-block" onClick={() => setMorePane("newsletter")}>
-            Morning brief / Improve email
+          <button className="menu-link" onClick={() => setMorePane("newsletter")}>
+            Morning brief <span>→</span>
           </button>
-          <button className="btn btn-ghost btn-lg btn-block" onClick={() => setMorePane("import")}>
-            Import CRM exports
+          <button className="menu-link" onClick={() => setMorePane("import")}>
+            Import CRM exports <span>→</span>
           </button>
-          <button className="btn btn-ghost btn-lg btn-block" onClick={() => setMorePane("settings")}>
-            Settings
+          <button className="menu-link" onClick={() => setMorePane("settings")}>
+            Settings <span>→</span>
           </button>
         </div>
       </>
@@ -1910,15 +1932,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand-mark" aria-hidden>
-          <IconHome />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <p className="brand-title serif">CliffsCRM</p>
+        <div className="brand-block">
+          <p className="brand-kicker">Express · Montgomery</p>
+          <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            To dial today: {toDialCount}
-            {inbox.length ? ` · Inbox ${inbox.length}` : ""}
+            Field desk
+            {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
+        </div>
+        <div className="dial-pill" aria-label={`To dial today ${toDialCount}`}>
+          <strong className="mono">{toDialCount}</strong>
+          <span>To dial</span>
         </div>
       </header>
 
