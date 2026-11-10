@@ -124,6 +124,7 @@ h1, h2, h3, .serif {
 .chip-locked { background: var(--warn-bg); color: #5a4a12; }
 .chip-called { background: var(--called); color: #445040; }
 .chip-dnc { background: var(--danger-bg); color: var(--danger); }
+.chip-active { background: var(--accent); color: var(--primary-fg); }
 .search {
   display: flex;
   align-items: center;
@@ -280,6 +281,36 @@ h1, h2, h3, .serif {
   padding: 0 0.85rem;
 }
 .file-btn input { display: none; }
+.copy-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(28, 36, 28, 0.45);
+  display: grid;
+  place-items: end center;
+  padding: 1rem;
+  padding-bottom: calc(5.5rem + var(--safe-bottom));
+}
+.copy-sheet-card {
+  width: min(28rem, 100%);
+  background: var(--surface);
+  border-radius: 1.25rem;
+  box-shadow: var(--sheet);
+  padding: 1rem 1.1rem 1.15rem;
+}
+.copy-sheet-card h2 { margin: 0; font-size: 1.2rem; }
+.copy-sheet-text {
+  width: 100%;
+  min-height: 10rem;
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--bg);
+  padding: 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
 @media (min-width: 640px) {
   .app-shell {
     border-left: 1px solid var(--border);
