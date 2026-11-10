@@ -2,7 +2,7 @@ import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
-const API_ROUTES = ["/api/drop-sync", "/api/newsletter", "/api/mpc-inbox"] as const;
+const API_ROUTES = ["/api/drop-sync", "/api/newsletter", "/api/mpc-inbox", "/api/suggest"] as const;
 
 /** Local stand-in for Cursor app functions under /api/* */
 function localApiPlugin(): Plugin {

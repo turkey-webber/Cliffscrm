@@ -12,6 +12,8 @@ export type Persisted = {
   visitsDone: number;
   importLog: string;
   dialer: Dialer;
+  /** After Save & next, automatically dial the next phone (default on). */
+  autoDialNext: boolean;
   wrapUps: WrapUp[];
   captures: CaptureItem[];
   mpc: MpcCandidate[];
@@ -30,6 +32,7 @@ export function defaultPersisted(): Persisted {
     visitsDone: 0,
     importLog: "Waiting for Contact summary / Sales Planner drop…",
     dialer: "iphone",
+    autoDialNext: true,
     wrapUps: [],
     captures: [],
     mpc: [],
@@ -59,6 +62,7 @@ export function loadState(): Persisted {
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
       mpc: Array.isArray(parsed.mpc) ? parsed.mpc : [],
       todayMode: parsed.todayMode === "truck" ? "truck" : "desk",
+      autoDialNext: parsed.autoDialNext !== false,
       newsletterPrefs: {
         ...DEFAULT_NEWSLETTER_PREFS,
         ...(parsed.newsletterPrefs || {}),
