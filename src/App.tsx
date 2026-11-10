@@ -1,35 +1,51 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_POINTS,
   OFFICE,
   isDemoCompany,
   is2x,
+  matchCompany,
   resultLabel,
   scoreFor,
   type CallResult,
   type Company,
   type Dialer,
 } from "./data";
+import { buildNextList, buildRouteStops, routeSummary, toDialToday } from "./flow";
 import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
-import { loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles, emptyRecall } from "./import/recall";
+import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
 import type { RecallStore } from "./import/types";
+import { buildCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
+import { loadState, saveState } from "./persist";
 import {
   callNoteFields,
   companyRecordFields,
   formatPasteBlock,
   jobOrderQuickEntryFields,
+  wrapUpCardCopy,
 } from "./q4";
-import { WEINBERG_CARDS, openerFor } from "./scripts";
+import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
+import { OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
+import {
+  CALL_TYPES,
+  Q4_GOALS,
+  addDaysIso,
+  blankWrapUp,
+  todayIso,
+  toggleGoal,
+  wrapUpValid,
+  type CaptureItem,
+  type WrapOutcome,
+  type WrapUp,
+} from "./wrapup";
 
-type Tab = "today" | "map" | "calls" | "book" | "more";
-type MorePane = "home" | "blitz" | "q4" | "import" | "settings";
-type MapFilter = "All" | "Route" | "Hot" | "Customers" | "Missing" | "Nearby";
+type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
+type MorePane = "home" | "blitz" | "import" | "settings" | "company";
+type TodayMode = "desk" | "truck";
 
 const LOCK_MS = 10 * 60 * 1000;
 const CALLER = "Cliff";
-const STORAGE_KEY = "cliffscrm-prototype-v2";
-const MAP_FILTERS: MapFilter[] = ["All", "Route", "Hot", "Customers", "Missing", "Nearby"];
 
 type UndoState = {
   companyId: string;
@@ -39,48 +55,6 @@ type UndoState = {
   expires: number;
 };
 
-type Persisted = {
-  companies: Company[];
-  myScore: number;
-  callsDone: number;
-  visitsDone: number;
-  importLog: string;
-  dialer: Dialer;
-};
-
-function defaultPersisted(): Persisted {
-  return {
-    companies: [],
-    myScore: 0,
-    callsDone: 0,
-    visitsDone: 0,
-    importLog: "Waiting for Contact summary / Sales Planner drop…",
-    dialer: "iphone",
-  };
-}
-
-function loadState(): Persisted {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultPersisted();
-    const parsed = JSON.parse(raw) as Partial<Persisted>;
-    const companies = Array.isArray(parsed.companies)
-      ? parsed.companies.filter((c) => c && !isDemoCompany(c as Company))
-      : [];
-    return {
-      ...defaultPersisted(),
-      ...parsed,
-      companies,
-      importLog:
-        companies.length === 0 && (!parsed.importLog || /demo/i.test(parsed.importLog || ""))
-          ? defaultPersisted().importLog
-          : (parsed.importLog ?? defaultPersisted().importLog),
-    };
-  } catch {
-    return defaultPersisted();
-  }
-}
-
 function mapsUrl(stops: Company[]): string {
   const origin = encodeURIComponent(OFFICE.address);
   const withCoords = stops.filter((s) => s.lat && s.lng);
@@ -88,32 +62,13 @@ function mapsUrl(stops: Company[]): string {
   const dest = withCoords[withCoords.length - 1];
   const mid = withCoords.slice(0, -1);
   const waypoints = mid.map((s) => `${s.lat},${s.lng}`).join("|");
-  const destination = `${dest.lat},${dest.lng}`;
-  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${encodeURIComponent(destination)}${waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ""}`;
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${encodeURIComponent(`${dest.lat},${dest.lng}`)}${waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : ""}`;
 }
 
 function appleMapsUrl(c: Company): string {
   const daddr = encodeURIComponent(`${c.address}, ${c.city}, AL`);
   const saddr = encodeURIComponent(OFFICE.address);
   return `https://maps.apple.com/?saddr=${saddr}&daddr=${daddr}&dirflg=d`;
-}
-
-function haversineMiles(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-  return 3958.8 * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
-}
-
-function lockCountdown(c: Company, now: number): string {
-  if (!c.lockUntil) return "";
-  const left = Math.max(0, c.lockUntil - now);
-  const m = Math.floor(left / 60000);
-  const s = Math.floor((left % 60000) / 1000);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function releaseExpiredLocks(list: Company[], now: number): Company[] {
@@ -135,18 +90,12 @@ function IconHome() {
     </svg>
   );
 }
-function IconMap() {
+function IconMpc() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="m9 4 6 2 6-2v16l-6 2-6-2-6 2V6l6-2z" />
-      <path d="M9 4v16M15 6v16" />
-    </svg>
-  );
-}
-function IconPhone() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.5-1.1a2 2 0 0 1 2.1-.4c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z" />
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }
@@ -155,6 +104,14 @@ function IconBook() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+function IconQ4() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
     </svg>
   );
 }
@@ -175,802 +132,323 @@ function BadgeRow({ c }: { c: Company }) {
       {c.badges.includes("active") && <span className="chip">Active</span>}
       {c.badges.includes("jackpot") && <span className="chip chip-jackpot">Jackpot</span>}
       {is2x(c) && <span className="chip chip-2x">2x</span>}
+      {c.nextTouch && <span className="chip">Next {c.nextTouch}</span>}
     </div>
   );
 }
 
-function StateChip({ c, now }: { c: Company; now: number }) {
-  if (c.blitzState === "locked") {
-    return (
-      <span className="chip chip-locked">
-        Being called by {c.lockedBy} · {lockCountdown(c, now)}
-      </span>
-    );
-  }
-  if (c.blitzState === "called") {
-    return (
-      <span className="chip chip-called">
-        Called{c.lastScore ? ` +${c.lastScore} ${resultLabel(c.lastResult!)}` : ""} · {c.lastCaller}
-      </span>
-    );
-  }
-  if (c.blitzState === "dnc") return <span className="chip chip-dnc">Do not call</span>;
-  return <span className="chip chip-open">Open</span>;
-}
-
-function TodayScreen({
-  visitsDone,
-  callsDone,
-  stopCount,
-  importLog,
-  nextCall,
-  plannerLabel,
-  bookLabel,
-  query,
-  onQuery,
-  onDial,
-  onOpenBlitz,
-  onAllowLocation,
-  locationLabel,
-  nearby,
-  onSelectCompany,
-  onCopyNotes,
-  onGoImport,
+function GoalGrid({
+  selected,
+  onToggle,
 }: {
-  visitsDone: number;
-  callsDone: number;
-  stopCount: number;
-  importLog: string;
-  nextCall: Company | undefined;
-  plannerLabel: string;
-  bookLabel: string;
-  query: string;
-  onQuery: (q: string) => void;
-  onDial: (c: Company) => void;
-  onOpenBlitz: (c: Company) => void;
-  onAllowLocation: () => void;
-  locationLabel: string;
-  nearby: Company[];
-  onSelectCompany: (id: string) => void;
-  onCopyNotes: () => void;
-  onGoImport: () => void;
+  selected: string[];
+  onToggle: (g: string) => void;
 }) {
   return (
-    <>
-      <div className="section-head">
-        <h1>Today</h1>
-        <p>
-          {visitsDone} of {OFFICE.visitGoal} visits · {callsDone} of {OFFICE.callGoal} calls
-        </p>
-        <p className="subtle">
-          {stopCount} planner stop{stopCount === 1 ? "" : "s"} · from {OFFICE.address}
-        </p>
-      </div>
-      {!nextCall && (
-        <div className="demo-banner">
-          Import the newest <strong>Contact Summary</strong> (Book) and <strong>Sales Planner</strong>{" "}
-          (Today’s queue). Phones only if present in Contact Summary.
-          <button className="btn btn-primary btn-block" style={{ marginTop: "0.65rem" }} onClick={onGoImport}>
-            Go to Import
+    <div className="goal-grid">
+      {Q4_GOALS.map((g) => (
+        <label key={g} className={`goal-check ${selected.includes(g) ? "on" : ""}`}>
+          <input type="checkbox" checked={selected.includes(g)} onChange={() => onToggle(g)} />
+          <span>{g}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function WrapUpSheet({
+  draft,
+  onChange,
+  onSaveNext,
+  onSaveStay,
+  onClose,
+}: {
+  draft: WrapUp;
+  onChange: (w: WrapUp) => void;
+  onSaveNext: () => void;
+  onSaveStay: () => void;
+  onClose: () => void;
+}) {
+  const err = wrapUpValid(draft);
+  return (
+    <div className="sheet-overlay" role="dialog" aria-label="Edit scheduled contact">
+      <div className="sheet-card wrap-sheet">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <div>
+            <p className="subtle" style={{ margin: 0 }}>
+              Edit scheduled contact
+            </p>
+            <h2 style={{ margin: "0.2rem 0 0" }}>{draft.companyName}</h2>
+          </div>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Close
           </button>
         </div>
-      )}
-      <div className="card">
-        <p className="subtle" style={{ marginTop: 0 }}>
-          Backbone files
-        </p>
-        <p style={{ marginTop: "0.35rem" }}>
-          <strong>Contact Summary</strong> · {bookLabel}
-        </p>
-        <p>
-          <strong>Sales Planner</strong> · {plannerLabel}
-        </p>
-        <p className="subtle">{importLog}</p>
-      </div>
-      <div className="card">
-        {nextCall ? (
-          <>
-            <p className="subtle" style={{ marginTop: 0 }}>
-              Next on planner{nextCall.plannerOrder != null ? ` · stop ${nextCall.plannerOrder}` : ""}
-              {nextCall.inBook || nextCall.fromContactSummary ? "" : " · not in Contact Summary yet"}
-            </p>
-            <h2>{nextCall.name}</h2>
-            <p>
-              {nextCall.city}
-              {nextCall.territory ? ` · Territory ${nextCall.territory}` : ""}
-              {nextCall.contactName ? ` · ${nextCall.contactName}` : ""}
-              {nextCall.phone ? ` · ${nextCall.phone}` : " · No phone on file"}
-            </p>
-            <BadgeRow c={nextCall} />
-            <div className="row" style={{ marginTop: "0.9rem" }}>
-              <button className="btn btn-primary btn-lg" style={{ flex: 1 }} onClick={() => onDial(nextCall)}>
-                Call
-              </button>
-              <button className="btn btn-ghost btn-lg" style={{ flex: 1 }} onClick={() => onOpenBlitz(nextCall)}>
-                Open in Blitz
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <h2>No planner stops</h2>
-            <p>Drop in today’s Sales Planner (Word) — Contact Summary fills phones and contacts.</p>
-          </>
-        )}
-      </div>
-      <div className="search">
-        <span className="subtle">⌕</span>
-        <input
-          placeholder="Company or name"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          aria-label="Company or name"
-        />
-      </div>
-      <div className="card">
-        <h2>Near you</h2>
-        <p>{locationLabel}</p>
-        <button className="btn btn-ghost" style={{ marginTop: "0.65rem" }} onClick={onAllowLocation}>
-          Allow location
-        </button>
-        {nearby.length > 0 && (
-          <div className="stack" style={{ marginTop: "0.85rem" }}>
-            {nearby.map((c) => (
-              <button
-                key={c.id}
-                className="list-item"
-                style={{ width: "100%", textAlign: "left", padding: "0.55rem 0" }}
-                onClick={() => onSelectCompany(c.id)}
+        <div className="wrap-scroll">
+          <h3>Step 2 — Results</h3>
+          <GoalGrid
+            selected={draft.resultGoals}
+            onToggle={(g) => onChange({ ...draft, resultGoals: toggleGoal(draft.resultGoals, g) })}
+          />
+          <label className="field-label">Other Results</label>
+          <textarea
+            className="area"
+            rows={3}
+            value={draft.otherResults}
+            onChange={(e) => onChange({ ...draft, otherResults: e.target.value })}
+            placeholder="Results notes"
+          />
+          <label className="field-label">Company Rep</label>
+          <input
+            className="select"
+            value={draft.companyRep}
+            onChange={(e) => onChange({ ...draft, companyRep: e.target.value })}
+          />
+          <div className="grid-2" style={{ marginTop: "0.55rem" }}>
+            <div>
+              <label className="field-label">Decision Maker</label>
+              <select
+                className="select"
+                value={draft.decisionMaker}
+                onChange={(e) => onChange({ ...draft, decisionMaker: e.target.value as WrapUp["decisionMaker"] })}
               >
-                <div style={{ flex: 1 }}>
-                  <strong>{c.name}</strong>
-                  <div className="muted">
-                    {c.city}
-                    {c.lat != null && c.lng != null
-                      ? ` · ${haversineMiles(OFFICE.lat, OFFICE.lng, c.lat, c.lng).toFixed(1)} mi from office`
-                      : ""}
-                  </div>
-                </div>
+                <option value="">—</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Left Message</label>
+              <select
+                className="select"
+                value={draft.leftMessage}
+                onChange={(e) => onChange({ ...draft, leftMessage: e.target.value as WrapUp["leftMessage"] })}
+              >
+                <option value="">—</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+          </div>
+          <label className="field-label">Call Type</label>
+          <select
+            className="select"
+            value={draft.callType}
+            onChange={(e) => onChange({ ...draft, callType: e.target.value })}
+          >
+            {CALL_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <label className="field-label">Date</label>
+          <input
+            className="select"
+            type="date"
+            value={draft.resultDate}
+            onChange={(e) => onChange({ ...draft, resultDate: e.target.value })}
+          />
+
+          <h3 style={{ marginTop: "1.1rem" }}>Step 3 — Future Contact</h3>
+          <GoalGrid
+            selected={draft.futureGoals}
+            onToggle={(g) => onChange({ ...draft, futureGoals: toggleGoal(draft.futureGoals, g) })}
+          />
+          <label className="field-label">Other Goals</label>
+          <textarea
+            className="area"
+            rows={3}
+            value={draft.otherGoals}
+            onChange={(e) => onChange({ ...draft, otherGoals: e.target.value })}
+            placeholder="Next-touch goals"
+          />
+          <label className="field-label">Call Type</label>
+          <select
+            className="select"
+            value={draft.futureCallType}
+            onChange={(e) => onChange({ ...draft, futureCallType: e.target.value })}
+          >
+            {CALL_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <label className="field-label">Date</label>
+          <input
+            className="select"
+            type="date"
+            value={draft.futureDate}
+            onChange={(e) => onChange({ ...draft, futureDate: e.target.value })}
+          />
+          <div className="row wrap" style={{ marginTop: "0.45rem" }}>
+            {[
+              ["Tomorrow", 1],
+              ["1 week", 7],
+              ["2 weeks", 14],
+              ["1 month", 30],
+            ].map(([label, days]) => (
+              <button
+                key={label as string}
+                type="button"
+                className="chip"
+                onClick={() => onChange({ ...draft, futureDate: addDaysIso(days as number) })}
+              >
+                {label}
               </button>
             ))}
           </div>
-        )}
-      </div>
-      <button className="btn btn-primary btn-block" onClick={onCopyNotes}>
-        Copy today’s notes
-      </button>
-      <p className="subtle" style={{ marginTop: "0.45rem" }}>
-        Paste into your afternoon wrap-up when you’re ready.
-      </p>
-    </>
-  );
-}
-
-function MapScreen({
-  filter,
-  onFilter,
-  routeStops,
-}: {
-  filter: MapFilter;
-  onFilter: (f: MapFilter) => void;
-  routeStops: Company[];
-}) {
-  return (
-    <>
-      <div className="section-head">
-        <h1>Map</h1>
-        <p>Order stops here, then open Google or Apple Maps for turn-by-turn.</p>
-      </div>
-      <div className="row wrap" style={{ marginBottom: "0.85rem" }}>
-        {MAP_FILTERS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={`chip ${filter === f ? "chip-active" : ""}`}
-            onClick={() => onFilter(f)}
-            aria-pressed={filter === f}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      <div className="card">
-        <h2>Today’s loop</h2>
-        <p>
-          Starts at office · {routeStops.length} plotted stop{routeStops.length === 1 ? "" : "s"}
-          {filter !== "All" ? ` · filter: ${filter}` : ""}
-        </p>
-        <div className="stack" style={{ marginTop: "0.75rem" }}>
-          {routeStops.map((c, i) => (
-            <div key={c.id} className="row" style={{ justifyContent: "space-between" }}>
-              <div>
-                <strong>
-                  {i + 1}. {c.name.replace(" (DEMO)", "")}
-                </strong>
-                <div className="subtle">
-                  {c.city} · T{c.territory}
-                </div>
-              </div>
-              <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
-                Apple
-              </a>
-            </div>
-          ))}
-          {!routeStops.length && <p className="empty">No mapped stops for this filter.</p>}
+          <label className="field-label">Company Rep</label>
+          <input
+            className="select"
+            value={draft.futureRep}
+            onChange={(e) => onChange({ ...draft, futureRep: e.target.value })}
+          />
+          <div style={{ height: "5.5rem" }} aria-hidden />
         </div>
-        <a
-          className="btn btn-primary btn-block btn-lg"
-          style={{ marginTop: "0.9rem", textDecoration: "none" }}
-          href={mapsUrl(routeStops)}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open loop in Google Maps
-        </a>
-      </div>
-    </>
-  );
-}
-
-function CallsScreen({
-  dialer,
-  waiting,
-  now,
-  onDial,
-}: {
-  dialer: Dialer;
-  waiting: Company[];
-  now: number;
-  onDial: (c: Company) => void;
-}) {
-  return (
-    <>
-      <div className="section-head">
-        <h1>Calls</h1>
-        <p>
-          Planner order · Dialer:{" "}
-          {dialer === "iphone" ? "iPhone tel:" : dialer === "aircall" ? "Aircall" : "Google Voice"}
-        </p>
-      </div>
-      <div className="card">
-        <h2>Sales Planner queue</h2>
-        {waiting.length === 0 && <p className="empty">Import a Sales Planner to build today’s queue</p>}
-        {waiting.map((c, i) => (
-          <div key={c.id} className="list-item">
-            <strong className="mono">{c.plannerOrder ?? i + 1}</strong>
-            <div style={{ flex: 1 }}>
-              <strong>{c.name}</strong>
-              <div className="muted">
-                {c.phone || "No phone on file"} · {c.city || "City TBD"}
-                {c.inBook || c.fromContactSummary ? "" : " · planner-only"}
-              </div>
-              <div style={{ marginTop: "0.45rem" }}>
-                <StateChip c={c} now={now} />
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={() => onDial(c)}>
-              Call
+        <div className="wrap-footer">
+          {err && <p className="subtle" style={{ margin: "0 0 0.45rem" }}>{err}</p>}
+          <div className="row">
+            <button className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={!!err} onClick={onSaveNext}>
+              Save &amp; next
+            </button>
+            <button className="btn btn-ghost btn-lg" style={{ flex: 1 }} disabled={!!err} onClick={onSaveStay}>
+              Save &amp; stay
             </button>
           </div>
-        ))}
+        </div>
       </div>
-    </>
+    </div>
   );
 }
 
-function BookScreen({
+function CaptureSheet({
   companies,
-  filtered,
-  query,
-  onQuery,
-  onDial,
-  onQ4,
+  onSave,
+  onClose,
 }: {
   companies: Company[];
-  filtered: Company[];
-  query: string;
-  onQuery: (q: string) => void;
-  onDial: (c: Company) => void;
-  onQ4: (c: Company) => void;
+  onSave: (item: CaptureItem) => void;
+  onClose: () => void;
 }) {
+  const [mode, setMode] = useState<"voice" | "photo" | "type">("type");
+  const [text, setText] = useState("");
+  const [listening, setListening] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function guessCompany(blob: string): { id?: string; name?: string } {
+    const hit = companies.find((c) => {
+      const n = c.name.toLowerCase();
+      return n.length > 3 && blob.toLowerCase().includes(n);
+    });
+    if (hit) return { id: hit.id, name: hit.name };
+    const byContact = companies.find(
+      (c) => c.contactName && blob.toLowerCase().includes(c.contactName.toLowerCase()),
+    );
+    if (byContact) return { id: byContact.id, name: byContact.name };
+    return {};
+  }
+
+  function commit(finalText: string, m: CaptureItem["mode"]) {
+    const trimmed = finalText.trim();
+    if (!trimmed) return;
+    const guess = guessCompany(trimmed);
+    onSave({
+      id: `cap-${Date.now().toString(36)}`,
+      createdAt: Date.now(),
+      mode: m,
+      text: trimmed,
+      companyId: guess.id,
+      companyGuess: guess.name,
+      status: "inbox",
+    });
+  }
+
+  function startVoice() {
+    const SR = (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognition }).webkitSpeechRecognition
+      || (window as unknown as { SpeechRecognition?: new () => SpeechRecognition }).SpeechRecognition;
+    if (!SR) {
+      setMode("type");
+      setText((t) => t || "Voice not available here — type the note.");
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    setListening(true);
+    rec.onresult = (ev: SpeechRecognitionEvent) => {
+      const said = Array.from(ev.results)
+        .map((r) => r[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      setListening(false);
+      commit(said, "voice");
+    };
+    rec.onerror = () => {
+      setListening(false);
+      setMode("type");
+    };
+    rec.onend = () => setListening(false);
+    rec.start();
+  }
+
+  async function onPhoto(file: File) {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".txt") || lower.endsWith(".md") || file.type.startsWith("text/")) {
+      commit(await file.text(), "photo");
+      return;
+    }
+    // OCR isn't available offline — store a photo note prompt with filename.
+    commit(`Photo capture: ${file.name}\n(Paste OCR / yellow-pad text below if needed)\n`, "photo");
+    setMode("type");
+    setText(`Photo capture: ${file.name}\n`);
+  }
+
   return (
-    <>
-      <div className="section-head">
-        <h1>Book</h1>
-        <p>
-          Contact Summary · {companies.filter((c) => c.inBook || c.fromContactSummary).length} in book
-          {companies.length ? ` · ${companies.length} total` : ""}
-          {query.trim() ? ` · ${filtered.length} match` : ""}
-        </p>
-      </div>
-      <div className="search">
-        <span className="subtle">⌕</span>
+    <div className="sheet-overlay" role="dialog" aria-label="Capture">
+      <div className="sheet-card">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Capture</h2>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <p className="subtle">Under 5 seconds · no required fields · finishes later in inbox</p>
+        <div className="row wrap" style={{ margin: "0.75rem 0" }}>
+          <button className={`chip ${mode === "voice" ? "chip-active" : ""}`} onClick={() => { setMode("voice"); startVoice(); }}>
+            {listening ? "Listening…" : "Voice"}
+          </button>
+          <button className={`chip ${mode === "photo" ? "chip-active" : ""}`} onClick={() => fileRef.current?.click()}>
+            Photo
+          </button>
+          <button className={`chip ${mode === "type" ? "chip-active" : ""}`} onClick={() => setMode("type")}>
+            Type
+          </button>
+        </div>
         <input
-          placeholder="Search book"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          aria-label="Search book"
-        />
-      </div>
-      <div className="card">
-        {filtered.length === 0 && <p className="empty">No companies match that search.</p>}
-        {filtered.map((c) => (
-          <div key={c.id} className="list-item">
-            <div style={{ flex: 1 }}>
-              <strong>{c.name}</strong>
-                <div className="muted">
-                  {c.contactName || c.contactTitle || "Contact TBD"}
-                  {c.plannerOrder != null ? ` · Planner #${c.plannerOrder}` : ""}
-                  {c.address || c.city ? ` · ${[c.address, c.city].filter(Boolean).join(", ")}` : ""}
-                  {c.phone ? ` · ${c.phone}` : ""}
-                </div>
-                <BadgeRow c={c} />
-            </div>
-            <div className="stack">
-              <button className="btn btn-primary" onClick={() => onDial(c)}>
-                Call
-              </button>
-              <button className="btn btn-ghost" onClick={() => onQ4(c)}>
-                Q4
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function BlitzScreen({
-  active,
-  myScore,
-  callsDone,
-  companies,
-  scriptOn,
-  scriptIdx,
-  undo,
-  now,
-  onBack,
-  onClaim,
-  onDial,
-  onHideScript,
-  onShowScript,
-  onNextScript,
-  onResult,
-  onUndo,
-  onSelect,
-}: {
-  active: Company;
-  myScore: number;
-  callsDone: number;
-  companies: Company[];
-  scriptOn: boolean;
-  scriptIdx: number;
-  undo: UndoState | null;
-  now: number;
-  onBack: () => void;
-  onClaim: (id: string) => void;
-  onDial: (c: Company) => void;
-  onHideScript: () => void;
-  onShowScript: () => void;
-  onNextScript: () => void;
-  onResult: (r: CallResult) => void;
-  onUndo: () => void;
-  onSelect: (id: string) => void;
-}) {
-  const ptsPreview = (r: CallResult) => {
-    const p = scoreFor(r, active, DEFAULT_POINTS);
-    return p ? `+${p}` : "";
-  };
-  return (
-    <>
-      <button className="btn btn-ghost" onClick={onBack}>
-        ← More
-      </button>
-      <div className="section-head">
-        <h1>Team desk</h1>
-        <p>Office Blitz · all day · shared list prototype (this device)</p>
-      </div>
-      <div className="score-strip">
-        <div className="score-cell">
-          <strong>{myScore}</strong>
-          <span>Your points</span>
-        </div>
-        <div className="score-cell">
-          <strong>{myScore}</strong>
-          <span>Office total</span>
-        </div>
-        <div className="score-cell">
-          <strong>{callsDone}</strong>
-          <span>Results</span>
-        </div>
-      </div>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <StateChip c={active} now={now} />
-          <button className="btn btn-ghost" onClick={() => onClaim(active.id)}>
-            Claim 10 min
-          </button>
-        </div>
-        <h2 style={{ marginTop: "0.7rem" }}>{active.name}</h2>
-        <p>
-          {active.city} · Territory {active.territory}
-        </p>
-        <BadgeRow c={active} />
-        <button className="btn btn-primary btn-block btn-lg" style={{ marginTop: "0.85rem" }} onClick={() => onDial(active)}>
-          Call {active.phone || "(add phone from import)"}
-        </button>
-      </div>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Research</h2>
-          <span className="subtle">{active.research.length} fact(s)</span>
-        </div>
-        {active.research.length === 0 ? (
-          <p>No research yet</p>
-        ) : (
-          active.research.map((r, i) => (
-            <div key={i} style={{ marginTop: "0.65rem" }}>
-              <strong>{r.fact}</strong>
-              <div className="subtle">
-                {r.source} · {r.date}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-      {scriptOn ? (
-        <div className="card script-card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <h2>{WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].title}</h2>
-            <button className="btn btn-ghost" onClick={onHideScript}>
-              Hide
-            </button>
-          </div>
-          <p>{scriptIdx === 0 ? openerFor(active) : WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].body}</p>
-          <button className="btn btn-ghost" style={{ marginTop: "0.55rem" }} onClick={onNextScript}>
-            Next script card
-          </button>
-        </div>
-      ) : (
-        <button className="btn btn-ghost btn-block" onClick={onShowScript}>
-          Show scripts (Weinberg first)
-        </button>
-      )}
-      <div className="card">
-        <h2>Result</h2>
-        <p>Points hit the board instantly · 10-second undo</p>
-        <div className="grid-2" style={{ marginTop: "0.75rem" }}>
-          <button className="btn btn-primary btn-lg" onClick={() => onResult("appointment")}>
-            Appointment {ptsPreview("appointment")}
-          </button>
-          <button className="btn btn-primary btn-lg" onClick={() => onResult("job_order")}>
-            Job order {ptsPreview("job_order")}
-          </button>
-          <button className="btn btn-accent btn-lg" onClick={() => onResult("discovery")}>
-            Discovery done {ptsPreview("discovery")}
-          </button>
-          <button className="btn btn-ghost btn-lg" onClick={() => onResult("voicemail")}>
-            Voicemail
-          </button>
-          <button className="btn btn-warn btn-lg" onClick={() => onResult("callback")}>
-            Callback
-          </button>
-          <button className="btn btn-danger btn-lg" onClick={() => onResult("not_interested")}>
-            Not interested
-          </button>
-        </div>
-        <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={() => onResult("skip")}>
-          Skip
-        </button>
-      </div>
-      {undo && now < undo.expires && (
-        <div className="undo-bar">
-          <span>
-            +{undo.points} {undo.label} · undo {Math.ceil((undo.expires - now) / 1000)}s
-          </span>
-          <button
-            className="btn btn-ghost"
-            style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
-            onClick={onUndo}
-          >
-            Undo
-          </button>
-        </div>
-      )}
-      <div className="card">
-        <h2>Shared list</h2>
-        {companies.map((c) => (
-          <button
-            key={c.id}
-            className="list-item"
-            style={{
-              width: "100%",
-              textAlign: "left",
-              background:
-                c.blitzState === "locked"
-                  ? "var(--warn-bg)"
-                  : c.blitzState === "called"
-                    ? "var(--called)"
-                    : c.blitzState === "dnc"
-                      ? "var(--danger-bg)"
-                      : "transparent",
-              borderRadius: "0.75rem",
-              padding: "0.75rem",
-              marginBottom: "0.35rem",
-            }}
-            onClick={() => onSelect(c.id)}
-          >
-            <div style={{ flex: 1 }}>
-              <strong>{c.name.replace(" (DEMO)", "")}</strong>
-              <div style={{ marginTop: "0.35rem" }}>
-                <StateChip c={c} now={now} />
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function Q4Pane({ active, onBack, onCopy }: { active: Company; onBack: () => void; onCopy: (text: string, label: string) => void }) {
-  const callFields = callNoteFields(active, active.lastResult, CALLER);
-  const companyFields = companyRecordFields(active);
-  const joFields = jobOrderQuickEntryFields(active);
-  return (
-    <>
-      <button className="btn btn-ghost" onClick={onBack}>
-        ← More
-      </button>
-      <div className="section-head">
-        <h1>Q4 smart copy</h1>
-        <p>Hand-enter into Q4 — copy one field or a whole block. Empty stays empty.</p>
-      </div>
-      <div className="card">
-        <h2>{active.name}</h2>
-        <p>Pick a company from Book if this isn’t the right one.</p>
-      </div>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Call note</h2>
-          <button className="btn btn-primary" onClick={() => onCopy(callFields[0].value, "call note")}>
-            Copy all
-          </button>
-        </div>
-        <pre className="q4-block">{callFields[0].value}</pre>
-      </div>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Company record</h2>
-          <button
-            className="btn btn-ghost"
-            onClick={() => onCopy(formatPasteBlock("Q4 COMPANY RECORD", companyFields), "company block")}
-          >
-            Copy block
-          </button>
-        </div>
-        {companyFields.map((f) => (
-          <div key={f.label} className="field-copy">
-            <div>
-              <strong>{f.label}</strong>
-              {f.value || <span className="subtle">(empty)</span>}
-            </div>
-            <button className="btn btn-ghost" onClick={() => onCopy(f.value, f.label)} disabled={!f.value}>
-              Copy
-            </button>
-          </div>
-        ))}
-      </div>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Job Order Quick Entry</h2>
-          <button
-            className="btn btn-ghost"
-            onClick={() => onCopy(formatPasteBlock("Q4 JOB ORDER", joFields), "job order block")}
-          >
-            Copy block
-          </button>
-        </div>
-        {joFields.map((f) => (
-          <div key={f.label} className="field-copy">
-            <div>
-              <strong>{f.label}</strong>
-              {f.value || <span className="subtle">(fill on call / leave blank)</span>}
-            </div>
-            <button className="btn btn-ghost" onClick={() => onCopy(f.value, f.label)} disabled={!f.value}>
-              Copy
-            </button>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function ImportPane({
-  onBack,
-  onManualFiles,
-  onSyncDrive,
-  onPruneNewest,
-  onResetDemo,
-  busy,
-  recall,
-}: {
-  onBack: () => void;
-  onManualFiles: (files: FileList) => void;
-  onSyncDrive: () => void;
-  onPruneNewest: () => void;
-  onResetDemo: () => void;
-  busy: string | null;
-  recall: RecallStore;
-}) {
-  const roleCounts = recall.files.reduce<Record<string, number>>((acc, f) => {
-    acc[f.role] = (acc[f.role] || 0) + 1;
-    return acc;
-  }, {});
-  return (
-    <>
-      <button className="btn btn-ghost" onClick={onBack}>
-        ← More
-      </button>
-      <div className="section-head">
-        <h1>Import</h1>
-        <p>Two backbone files drive the desk. Newest of each kind wins; extras enrich recall.</p>
-      </div>
-      <div className="card">
-        <h2>Backbone</h2>
-        <p>
-          <strong>Contact Summary / CS</strong> (Excel) → Book of record (phones, contacts)
-        </p>
-        <p>
-          <strong>Sales Planner</strong> (Word) → Today &amp; Calls queue order
-        </p>
-        <p className="subtle" style={{ marginTop: "0.55rem" }}>
-          Optional: Blitz research / Expeditor inbox → facts on matching companies
-        </p>
-      </div>
-      <button className="btn btn-primary btn-block btn-lg" disabled={!!busy} onClick={onSyncDrive}>
-        {busy === "drive" ? "Syncing Grok Drop…" : "Sync Grok Drop (Drive)"}
-      </button>
-      <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
-        {busy === "manual" ? "Importing…" : "Pick files from Drop"}
-        <input
+          ref={fileRef}
           type="file"
-          multiple
-          // No accept filter: iOS Files/Drive often greys out .xlsx/.csv when MIME/UTI don't match.
-          disabled={!!busy}
+          accept="image/*,.txt,.md,text/plain"
+          hidden
           onChange={(e) => {
-            if (e.target.files?.length) onManualFiles(e.target.files);
+            const f = e.target.files?.[0];
+            if (f) void onPhoto(f);
             e.target.value = "";
           }}
         />
-      </label>
-      <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
-        Or pick a whole folder
-        <input
-          type="file"
-          multiple
-          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-          disabled={!!busy}
-          onChange={(e) => {
-            if (e.target.files?.length) onManualFiles(e.target.files);
-            e.target.value = "";
-          }}
+        <textarea
+          className="area"
+          rows={5}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Quick note, yellow-pad text, Teams/email snippet…"
         />
-      </label>
-      <button
-        className="btn btn-warn btn-block"
-        style={{ marginTop: "0.55rem" }}
-        disabled={!!busy || recall.files.length < 2}
-        onClick={onPruneNewest}
-      >
-        Keep newest only (drop older of each kind)
-      </button>
-      <div className="card" style={{ marginTop: "0.85rem" }}>
-        <h2>Recall</h2>
-        <p>{recall.lastImportLog || "No imports yet"}</p>
-        <p className="subtle">
-          {recall.files.length} file(s) cataloged · {recall.facts.length} fact(s) stored
-          {recall.lastSync ? ` · synced ${new Date(recall.lastSync).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT` : ""}
-        </p>
-        {Object.keys(roleCounts).length > 0 && (
-          <div className="stack" style={{ marginTop: "0.65rem" }}>
-            {Object.entries(roleCounts).map(([role, n]) => (
-              <div key={role} className="row" style={{ justifyContent: "space-between" }}>
-                <span>{ROLE_LABEL[role as keyof typeof ROLE_LABEL] || role}</span>
-                <span className="subtle">{n}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {recall.facts.slice(0, 5).map((f) => (
-          <div key={f.id} style={{ marginTop: "0.55rem" }}>
-            <strong>{f.companyHint}</strong>
-            <div className="subtle">{f.fact.slice(0, 140)}</div>
-          </div>
-        ))}
-      </div>
-      <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={onResetDemo}>
-        Clear book
-      </button>
-      <p className="subtle" style={{ marginTop: "0.55rem" }}>
-        Phones stay blank unless present in the file. Drive sync uses your app secrets when configured.
-      </p>
-    </>
-  );
-}
-
-function SettingsPane({
-  dialer,
-  onDialer,
-  onBack,
-}: {
-  dialer: Dialer;
-  onDialer: (d: Dialer) => void;
-  onBack: () => void;
-}) {
-  return (
-    <>
-      <button className="btn btn-ghost" onClick={onBack}>
-        ← More
-      </button>
-      <div className="section-head">
-        <h1>Settings</h1>
-        <p>Dialer and office defaults</p>
-      </div>
-      <div className="card">
-        <h2>Autodialer</h2>
-        <p>How Call should place the number</p>
-        <select
-          className="select"
-          style={{ marginTop: "0.75rem" }}
-          value={dialer}
-          onChange={(e) => onDialer(e.target.value as Dialer)}
-        >
-          <option value="iphone">iPhone (tel:)</option>
-          <option value="aircall">Aircall (stub → tel for now)</option>
-          <option value="google_voice">Google Voice</option>
-        </select>
-      </div>
-      <div className="card">
-        <h2>Office</h2>
-        <p>{OFFICE.address}</p>
-        <p>
-          Goals: {OFFICE.visitGoal} visits / {OFFICE.callGoal} calls
-        </p>
-      </div>
-      <div className="card">
-        <h2>Moderator</h2>
-        <p>Team login is set</p>
-        <p className="subtle">Password never shown here.</p>
-      </div>
-    </>
-  );
-}
-
-function MoreHome({ onOpen }: { onOpen: (pane: Exclude<MorePane, "home">) => void }) {
-  return (
-    <>
-      <div className="section-head">
-        <h1>More</h1>
-        <p>Montgomery desk · {OFFICE.agentName}</p>
-      </div>
-      <div className="card stack">
-        <button className="btn btn-primary btn-lg btn-block" onClick={() => onOpen("blitz")}>
-          Team desk / Blitz
-        </button>
-        <button className="btn btn-accent btn-lg btn-block" onClick={() => onOpen("q4")}>
-          Q4 smart copy
-        </button>
-        <button className="btn btn-ghost btn-lg btn-block" onClick={() => onOpen("import")}>
-          Import CRM exports
-        </button>
-        <button className="btn btn-ghost btn-lg btn-block" onClick={() => onOpen("settings")}>
-          Settings
+        <button className="btn btn-primary btn-block btn-lg" style={{ marginTop: "0.75rem" }} onClick={() => commit(text, mode)}>
+          Save to inbox
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -995,9 +473,13 @@ export default function App() {
   const initial = loadState();
   const [tab, setTab] = useState<Tab>("today");
   const [morePane, setMorePane] = useState<MorePane>("home");
+  const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
+  const [wrapUps, setWrapUps] = useState<WrapUp[]>(initial.wrapUps);
+  const [captures, setCaptures] = useState<CaptureItem[]>(initial.captures);
+  const [mpc, setMpc] = useState<MpcCandidate[]>(initial.mpc);
   const [query, setQuery] = useState("");
-  const [activeId, setActiveId] = useState<string>(initial.companies[0]?.id ?? "c1");
+  const [activeId, setActiveId] = useState<string>(initial.companies[0]?.id ?? "");
   const [myScore, setMyScore] = useState(initial.myScore);
   const [undo, setUndo] = useState<UndoState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -1008,23 +490,29 @@ export default function App() {
   const [importLog, setImportLog] = useState(initial.importLog);
   const [dialer, setDialer] = useState<Dialer>(initial.dialer);
   const [now, setNow] = useState(() => Date.now());
-  const [mapFilter, setMapFilter] = useState<MapFilter>("All");
-  const [locationLabel, setLocationLabel] = useState("Location off");
-  const [userLatLng, setUserLatLng] = useState<{ lat: number; lng: number } | null>(null);
   const [copySheet, setCopySheet] = useState<string | null>(null);
   const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
   const [importBusy, setImportBusy] = useState<string | null>(null);
+  const [wrapDraft, setWrapDraft] = useState<WrapUp | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [q4Day, setQ4Day] = useState(todayIso());
+  const [mpcForm, setMpcForm] = useState({ name: "", trade: "", note: "", resumeText: "" });
+  const [mpcBusy, setMpcBusy] = useState(false);
+  const [selectedMpc, setSelectedMpc] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-
   useEffect(() => {
     saveRecall(recall);
   }, [recall]);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(t);
+  }, [toast]);
 
-  // Auto Drive sync once on launch when secrets are configured (agent + manual still available).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1043,46 +531,37 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- launch-only auto sync
   }, []);
 
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2200);
-    return () => clearTimeout(t);
-  }, [toast]);
-
   const liveCompanies = useMemo(() => releaseExpiredLocks(companies, now), [companies, now]);
   const liveUndo = undo && now < undo.expires ? undo : null;
 
   useEffect(() => {
-    const payload: Persisted = {
+    saveState({
       companies: liveCompanies,
       myScore,
       callsDone,
       visitsDone,
       importLog,
       dialer,
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer]);
+      wrapUps,
+      captures,
+      mpc,
+      todayMode,
+    });
+  }, [liveCompanies, myScore, callsDone, visitsDone, importLog, dialer, wrapUps, captures, mpc, todayMode]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
-
-  const plannerQueue = useMemo(
-    () =>
-      liveCompanies
-        .filter((c) => c.plannerOrder != null && (c.blitzState === "open" || c.blitzState === "locked"))
-        .sort((a, b) => (a.plannerOrder ?? 0) - (b.plannerOrder ?? 0)),
-    [liveCompanies],
-  );
-  // Sales Planner is the call/visit backbone; fall back to open book only if no planner loaded.
-  const waiting = plannerQueue.length
-    ? plannerQueue
-    : liveCompanies.filter((c) => c.blitzState === "open" || c.blitzState === "locked");
-  const nextCall = waiting[0];
+  const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
+  const dialList = useMemo(() => toDialToday(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
+  const toDialCount = dialList.length;
+  const routeStops = useMemo(() => buildRouteStops(nextList, 8), [nextList]);
+  const inbox = captures.filter((c) => c.status === "inbox");
+  const staleInbox = inbox.filter((c) => now - c.createdAt > 24 * 60 * 60 * 1000);
+  const dayWraps = wrapUps.filter((w) => w.createdAt === q4Day);
+  const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
 
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
   const bookCount = liveCompanies.filter((c) => c.inBook || c.fromContactSummary).length;
-  const plannerCount = liveCompanies.filter((c) => c.plannerOrder != null).length;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1090,9 +569,7 @@ export default function App() {
       const aBook = a.inBook || a.fromContactSummary ? 0 : 1;
       const bBook = b.inBook || b.fromContactSummary ? 0 : 1;
       if (aBook !== bBook) return aBook - bBook;
-      const ao = a.plannerOrder ?? 9999;
-      const bo = b.plannerOrder ?? 9999;
-      return ao - bo || a.name.localeCompare(b.name);
+      return (a.plannerOrder ?? 9999) - (b.plannerOrder ?? 9999) || a.name.localeCompare(b.name);
     });
     if (!q) return bookFirst;
     return bookFirst.filter(
@@ -1102,45 +579,6 @@ export default function App() {
         c.contactName.toLowerCase().includes(q),
     );
   }, [liveCompanies, query]);
-
-  const mappedBase = useMemo(() => {
-    const withCoords = liveCompanies.filter((c) => c.lat && c.lng && c.blitzState !== "dnc");
-    const plannerMapped = withCoords
-      .filter((c) => c.plannerOrder != null)
-      .sort((a, b) => (a.plannerOrder ?? 0) - (b.plannerOrder ?? 0));
-    return plannerMapped.length ? plannerMapped : withCoords;
-  }, [liveCompanies]);
-
-  const routeStops = useMemo(() => {
-    let list = mappedBase;
-    if (mapFilter === "Hot") {
-      list = list.filter((c) => c.badges.includes("jackpot") || is2x(c));
-    } else if (mapFilter === "Customers") {
-      list = list.filter((c) => c.badges.includes("active") || c.badges.includes("first-year"));
-    } else if (mapFilter === "Missing") {
-      list = list.filter((c) => c.badges.includes("missing"));
-    } else if (mapFilter === "Route" || mapFilter === "Nearby") {
-      const origin = userLatLng ?? { lat: OFFICE.lat, lng: OFFICE.lng };
-      list = [...list].sort((a, b) => {
-        const da = haversineMiles(origin.lat, origin.lng, a.lat!, a.lng!);
-        const db = haversineMiles(origin.lat, origin.lng, b.lat!, b.lng!);
-        return da - db;
-      });
-      if (mapFilter === "Nearby") list = list.slice(0, 5);
-    }
-    return list.slice(0, 8);
-  }, [mappedBase, mapFilter, userLatLng]);
-
-  const nearby = useMemo(() => {
-    const origin = userLatLng ?? { lat: OFFICE.lat, lng: OFFICE.lng };
-    return [...mappedBase]
-      .sort(
-        (a, b) =>
-          haversineMiles(origin.lat, origin.lng, a.lat!, a.lng!) -
-          haversineMiles(origin.lat, origin.lng, b.lat!, b.lng!),
-      )
-      .slice(0, 4);
-  }, [mappedBase, userLatLng]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -1188,10 +626,70 @@ export default function App() {
     setActiveId(companyId);
   }
 
-  function openBlitz(c: Company) {
-    setActiveId(c.id);
-    setTab("more");
-    setMorePane("blitz");
+  function openWrap(c: Company, outcome: WrapOutcome, prefill = "") {
+    setWrapDraft(
+      blankWrapUp({
+        companyId: c.id,
+        companyName: c.name,
+        phone: c.phone,
+        companyRep: c.contactName,
+        futureRep: c.contactName,
+        outcome,
+        leftMessage: outcome === "voicemail" ? "yes" : "",
+        otherResults: prefill,
+        callType: "Other call - telephone",
+      }),
+    );
+  }
+
+  function persistWrap(draft: WrapUp, advance: boolean) {
+    const err = wrapUpValid(draft);
+    if (err) {
+      flash(err);
+      return;
+    }
+    const event = {
+      id: `t-${Date.now().toString(36)}`,
+      at: new Date().toISOString(),
+      kind: "wrapup",
+      summary: `${draft.outcome.replace("_", " ")} · next ${draft.futureDate}`,
+      detail: draft.otherResults || draft.otherGoals,
+    };
+    setWrapUps((prev) => [draft, ...prev.filter((w) => w.id !== draft.id)]);
+    setCompanies((prev) =>
+      prev.map((c) => {
+        if (c.id !== draft.companyId) return c;
+        if (draft.outcome === "skip") {
+          return { ...c, blitzState: "open", lockedBy: undefined, lockUntil: undefined };
+        }
+        const noteLine = `${draft.resultDate} · ${CALLER}: ${draft.otherResults || draft.outcome}`;
+        return {
+          ...c,
+          blitzState: "called",
+          lastResult: draft.outcome === "voicemail" ? "voicemail" : "discovery",
+          lastCaller: CALLER,
+          lastContacted: draft.resultDate,
+          nextTouch: draft.futureDate,
+          lockedBy: undefined,
+          lockUntil: undefined,
+          notes: [c.notes, noteLine].filter(Boolean).join("\n"),
+          timeline: [...(c.timeline || []), event],
+        };
+      }),
+    );
+    if (draft.outcome !== "skip") setCallsDone((n) => n + 1);
+    if (draft.resultGoals.includes("Appointment Set")) setVisitsDone((n) => n + 1);
+    if (draft.captureId) {
+      setCaptures((prev) =>
+        prev.map((cap) => (cap.id === draft.captureId ? { ...cap, status: "done" as const } : cap)),
+      );
+    }
+    setWrapDraft(null);
+    flash("Wrap-up saved");
+    if (advance) {
+      const nxt = nextList.find((n) => n.company.id !== draft.companyId);
+      if (nxt) setActiveId(nxt.company.id);
+    }
   }
 
   function applyResult(result: CallResult) {
@@ -1201,62 +699,33 @@ export default function App() {
       flash("Do not call — admin only");
       return;
     }
+    if (result === "skip") {
+      openWrap(current, "skip");
+      return;
+    }
+    if (result === "voicemail") {
+      openWrap(current, "voicemail");
+      return;
+    }
+    // Got them / other meaningful outcomes → full wrap-up
+    openWrap(current, "got_them", resultLabel(result));
     const points = scoreFor(result, current, DEFAULT_POINTS);
-    const previous = structuredClone(current);
-    const noteLine = `${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} CT · ${CALLER}: ${resultLabel(result)}`;
-    setCompanies((prev) =>
-      releaseExpiredLocks(prev, Date.now()).map((c) => {
-        if (c.id !== current.id) return c;
-        if (result === "skip") {
-          return { ...c, blitzState: "open", lockedBy: undefined, lockUntil: undefined };
-        }
-        if (result === "callback") {
-          return {
-            ...c,
-            blitzState: "open",
-            lastResult: result,
-            lastScore: points,
-            lastCaller: CALLER,
-            lockedBy: undefined,
-            lockUntil: undefined,
-            notes: [c.notes, noteLine].filter(Boolean).join("\n"),
-          };
-        }
-        return {
-          ...c,
-          blitzState: result === "not_interested" ? "dnc" : "called",
-          lastResult: result,
-          lastScore: points,
-          lastCaller: CALLER,
-          lockedBy: undefined,
-          lockUntil: undefined,
-          notes: [c.notes, noteLine].filter(Boolean).join("\n"),
-        };
-      }),
-    );
-    if (points) setMyScore((s) => s + points);
-    if (result !== "skip") setCallsDone((n) => n + 1);
-    if (result === "appointment") setVisitsDone((n) => n + 1);
-    if (result !== "skip") {
+    if (points) {
+      setMyScore((s) => s + points);
       setUndo({
         companyId: current.id,
-        previous,
+        previous: structuredClone(current),
         points,
         label: resultLabel(result),
         expires: Date.now() + 10_000,
       });
     }
-    const nxt = liveCompanies.find((c) => c.id !== current.id && c.blitzState === "open");
-    if (nxt && result !== "skip" && result !== "callback") setActiveId(nxt.id);
   }
 
   function undoLast() {
     if (!liveUndo) return;
-    const wasAppointment = liveUndo.label === "Appt";
     setCompanies((prev) => prev.map((c) => (c.id === liveUndo.companyId ? liveUndo.previous : c)));
     setMyScore((s) => Math.max(0, s - liveUndo.points));
-    setCallsDone((n) => Math.max(0, n - 1));
-    if (wasAppointment) setVisitsDone((n) => Math.max(0, n - 1));
     setActiveId(liveUndo.companyId);
     setUndo(null);
     flash("Undone");
@@ -1265,21 +734,15 @@ export default function App() {
   function dial(c: Company) {
     claim(c.id);
     if (!c.phone) {
-      flash("No phone on file — log the result in Blitz");
-      openBlitz(c);
-      return;
-    }
-    if (dialer === "aircall") {
-      flash("Aircall hook ready — connect API token in settings later");
-      window.location.href = `tel:${c.phone}`;
+      flash("No phone on file — open wrap-up or edit in Accounts");
+      openWrap(c, "got_them");
       return;
     }
     if (dialer === "google_voice") {
       window.open(`https://voice.google.com/u/0/calls?a=nc,%2B${c.phone.replace(/\D/g, "")}`, "_blank");
-      openBlitz(c);
-      return;
+    } else {
+      window.location.href = `tel:${c.phone}`;
     }
-    window.location.href = `tel:${c.phone}`;
   }
 
   function applyImportResult(result: Awaited<ReturnType<typeof ingestBrowserFiles>>) {
@@ -1294,16 +757,15 @@ export default function App() {
           ? `Stored ${result.facts.length} recall fact(s)`
           : "Nothing new to import",
     );
-    setTab(result.imported ? "book" : "more");
-    setMorePane(result.imported ? "home" : "import");
+    setTab("accounts");
+    setMorePane("home");
   }
 
   async function onManualFiles(files: FileList) {
     setImportBusy("manual");
     try {
       const real = companies.filter((c) => !isDemoCompany(c));
-      const result = await ingestBrowserFiles(files, real, recall.facts, classifyImport);
-      applyImportResult(result);
+      applyImportResult(await ingestBrowserFiles(files, real, recall.facts, classifyImport));
     } catch (e) {
       flash(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -1345,8 +807,7 @@ export default function App() {
         return;
       }
       const real = companies.filter((c) => !isDemoCompany(c));
-      const result = await ingestDrivePayload(data.files, real, recall.facts, classifyImport);
-      applyImportResult(result);
+      applyImportResult(await ingestDrivePayload(data.files, real, recall.facts, classifyImport));
     } catch (e) {
       flash(e instanceof Error ? e.message : "Drive sync failed");
     } finally {
@@ -1358,7 +819,6 @@ export default function App() {
     const { store, removed } = pruneRecallToNewest(recall);
     setRecall(store);
     setImportLog(store.lastImportLog);
-    // Drive prune is server-decided (folder-scoped soft-trash). Never send file IDs from the client.
     try {
       await fetch("/api/drop-sync", {
         method: "POST",
@@ -1371,152 +831,830 @@ export default function App() {
     flash(`Kept newest · removed ${removed.length}`);
   }
 
-  function allowLocation() {
-    if (!navigator.geolocation) {
-      flash("Geolocation not available in this browser");
-      setLocationLabel("Location unavailable");
+  async function readResumeFile(file: File): Promise<string> {
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".txt") || name.endsWith(".md") || file.type.startsWith("text/")) {
+      return file.text();
+    }
+    if (name.endsWith(".docx") || file.type.includes("wordprocessingml")) {
+      const mammoth = await import("mammoth");
+      const buf = await file.arrayBuffer();
+      const res = await mammoth.extractRawText({ arrayBuffer: buf });
+      return res.value || "";
+    }
+    if (name.endsWith(".pdf") || file.type === "application/pdf") {
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs",
+        import.meta.url,
+      ).toString();
+      const data = new Uint8Array(await file.arrayBuffer());
+      const doc = await pdfjs.getDocument({ data }).promise;
+      const chunks: string[] = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        chunks.push(content.items.map((it) => ("str" in it ? String(it.str) : "")).join(" "));
+      }
+      return chunks.join("\n");
+    }
+    return file.text();
+  }
+
+  async function submitMpc() {
+    const resumeText = mpcForm.resumeText.trim();
+    if (!resumeText) {
+      flash("Paste a resume or note first");
       return;
     }
-    setLocationLabel("Locating…");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLatLng({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocationLabel("Location on · sorted near you");
-        flash("Location on");
-      },
-      () => {
-        setLocationLabel("Location denied — using office");
-        flash("Location denied — using office as origin");
-      },
-      { enableHighAccuracy: true, timeout: 8000 },
-    );
+    setMpcBusy(true);
+    try {
+      const candidate = buildCandidate({
+        name: mpcForm.name,
+        trade: mpcForm.trade,
+        note: mpcForm.note,
+        resumeText,
+        book: liveCompanies,
+      });
+      setMpc((prev) => [candidate, ...prev]);
+      setSelectedMpc(candidate.id);
+      setMpcForm({ name: "", trade: "", note: "", resumeText: "" });
+      flash(`${candidate.matches.length} company matches`);
+    } finally {
+      setMpcBusy(false);
+    }
+  }
+
+  function addProspectToBook(m: MpcMatch) {
+    if (m.companyId) {
+      setActiveId(m.companyId);
+      setTab("accounts");
+      setMorePane("company");
+      return;
+    }
+    const existing = matchCompany(liveCompanies, m.companyName);
+    if (existing) {
+      setActiveId(existing.id);
+      setTab("accounts");
+      setMorePane("company");
+      flash("Already in book");
+      return;
+    }
+    const seed = TERRITORY_PROSPECTS.find((p) => p.name === m.companyName);
+    const id = `p-${Date.now().toString(36)}`;
+    const company: Company = {
+      id,
+      name: m.companyName,
+      city: m.city || seed?.city || "Montgomery",
+      address: m.address || seed?.address || "",
+      phone: m.phone || seed?.phone || "",
+      contactName: "",
+      contactTitle: "",
+      territory: "",
+      badges: ["prospect"],
+      research: seed
+        ? [{ source: seed.source, date: todayIso(), fact: seed.fact }]
+        : [{ source: "MPC match", date: todayIso(), fact: m.why }],
+      notes: `Added from MPC desk · ${m.why}`,
+      blitzState: "open",
+      inBook: false,
+    };
+    setCompanies((prev) => [company, ...prev]);
+    setActiveId(id);
+    flash("Prospect added to book");
   }
 
   let main: ReactNode = null;
+
   if (tab === "today") {
+    const deskItems = nextList;
     main = (
-      <TodayScreen
-        visitsDone={visitsDone}
-        callsDone={callsDone}
-        stopCount={plannerCount || routeStops.length}
-        importLog={importLog}
-        nextCall={nextCall}
-        plannerLabel={plannerFile ? `${plannerFile.name} · ${plannerCount} stops` : "Not imported yet"}
-        bookLabel={csFile ? `${csFile.name} · ${bookCount} companies` : "Not imported yet"}
-        query={query}
-        onQuery={setQuery}
-        onDial={dial}
-        onOpenBlitz={openBlitz}
-        onAllowLocation={allowLocation}
-        locationLabel={locationLabel}
-        nearby={nearby}
-        onSelectCompany={(id) => {
-          setActiveId(id);
-          setTab("more");
-          setMorePane("blitz");
-        }}
-        onGoImport={() => {
-          setTab("more");
-          setMorePane("import");
-        }}
-        onCopyNotes={() =>
-          void copyText(
-            `Express Expeditor · afternoon notes\n${new Date().toLocaleDateString("en-US")}\nFrom ${OFFICE.agentName}\n\n${
-              liveCompanies
-                .filter((c) => c.notes)
-                .map((c) => `${c.name}\n${c.notes}`)
-                .join("\n\n") || "No notes captured yet."
-            }`,
-            "today’s notes",
-          )
-        }
-      />
+      <>
+        <div className="section-head">
+          <h1>Today</h1>
+          <p>
+            To dial today: <strong className="mono">{toDialCount}</strong>
+            {inbox.length ? ` · ${inbox.length} capture inbox` : ""}
+            {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
+          </p>
+        </div>
+        <div className="row wrap" style={{ marginBottom: "0.85rem" }}>
+          <button className={`chip ${todayMode === "desk" ? "chip-active" : ""}`} onClick={() => setTodayMode("desk")}>
+            Desk
+          </button>
+          <button className={`chip ${todayMode === "truck" ? "chip-active" : ""}`} onClick={() => setTodayMode("truck")}>
+            Truck
+          </button>
+        </div>
+        {!deskItems.length && (
+          <div className="demo-banner">
+            Import Contact Summary + Sales Planner to build the ranked Next list.
+            <button
+              className="btn btn-primary btn-block"
+              style={{ marginTop: "0.65rem" }}
+              onClick={() => {
+                setTab("more");
+                setMorePane("import");
+              }}
+            >
+              Go to Import
+            </button>
+          </div>
+        )}
+        <div className="card">
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Backbone
+          </p>
+          <p>
+            <strong>Contact Summary</strong> · {csFile ? `${csFile.name} · ${bookCount}` : "Not imported"}
+          </p>
+          <p>
+            <strong>Sales Planner</strong> · {plannerFile ? plannerFile.name : "Not imported"}
+          </p>
+          <p className="subtle">{importLog}</p>
+        </div>
+        {todayMode === "desk" ? (
+          <div className="card">
+            <h2>Next</h2>
+            <p>Meetings first, then callbacks, then planner calls — one shared list.</p>
+            {!deskItems.length && <p className="empty">Nothing ranked for today yet.</p>}
+            {deskItems.slice(0, 25).map((item) => (
+              <div key={item.company.id} className="list-item">
+                <div style={{ flex: 1 }}>
+                  <strong>
+                    {item.motion.toUpperCase()} · {item.company.name}
+                  </strong>
+                  <div className="muted">
+                    {item.why}
+                    {item.company.phone ? ` · ${item.company.phone}` : " · No phone"}
+                    {item.company.contactName ? ` · ${item.company.contactName}` : ""}
+                  </div>
+                  <BadgeRow c={item.company} />
+                </div>
+                <div className="stack">
+                  <button className="btn btn-primary" onClick={() => dial(item.company)}>
+                    Call
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => openWrap(item.company, "got_them")}>
+                    Wrap
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="card">
+            <h2>Truck</h2>
+            <p>{routeSummary(routeStops)}</p>
+            {!routeStops.length && (
+              <p className="empty">No route yet. Ranked visits appear here when planner/coords exist.</p>
+            )}
+            {routeStops.map((c, i) => (
+              <div key={c.id} className="list-item">
+                <strong className="mono">{i + 1}</strong>
+                <div style={{ flex: 1 }}>
+                  <strong>{c.name}</strong>
+                  <div className="muted">
+                    {[c.address, c.city].filter(Boolean).join(", ") || "Address missing"}
+                  </div>
+                </div>
+                <a className="btn btn-ghost" href={appleMapsUrl(c)} target="_blank" rel="noreferrer">
+                  Apple
+                </a>
+              </div>
+            ))}
+            {!!routeStops.length && (
+              <a
+                className="btn btn-primary btn-block btn-lg"
+                style={{ marginTop: "0.75rem", textDecoration: "none" }}
+                href={mapsUrl(routeStops)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open loop in Google Maps
+              </a>
+            )}
+          </div>
+        )}
+        {!!inbox.length && (
+          <div className="card">
+            <h2>Capture inbox</h2>
+            <p>{inbox.length} unfinished · orange = older than 24h</p>
+            {inbox.map((cap) => {
+              const stale = now - cap.createdAt > 24 * 60 * 60 * 1000;
+              return (
+                <button
+                  key={cap.id}
+                  className="list-item"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    background: stale ? "var(--warn-bg)" : "transparent",
+                    borderRadius: "0.75rem",
+                  }}
+                  onClick={() => {
+                    const company =
+                      (cap.companyId && liveCompanies.find((c) => c.id === cap.companyId)) ||
+                      (cap.companyGuess && matchCompany(liveCompanies, cap.companyGuess));
+                    if (company) {
+                      setWrapDraft(
+                        blankWrapUp({
+                          companyId: company.id,
+                          companyName: company.name,
+                          phone: company.phone,
+                          companyRep: company.contactName,
+                          futureRep: company.contactName,
+                          outcome: "capture",
+                          otherResults: cap.text,
+                          captureId: cap.id,
+                          callType: "Other call - telephone",
+                        }),
+                      );
+                    } else {
+                      flash("Pick a company in Accounts, then wrap");
+                      setTab("accounts");
+                    }
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <strong>{cap.companyGuess || "Unassigned"}</strong>
+                    <div className="muted">{cap.text.slice(0, 120)}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </>
     );
-  } else if (tab === "map") {
-    main = <MapScreen filter={mapFilter} onFilter={setMapFilter} routeStops={routeStops} />;
-  } else if (tab === "calls") {
-    main = <CallsScreen dialer={dialer} waiting={waiting} now={now} onDial={dial} />;
-  } else if (tab === "book") {
+  } else if (tab === "mpc") {
+    const selected = mpc.find((c) => c.id === selectedMpc) || mpc[0];
     main = (
-      <BookScreen
-        companies={liveCompanies}
-        filtered={filtered}
-        query={query}
-        onQuery={setQuery}
-        onDial={dial}
-        onQ4={(c) => {
-          setActiveId(c.id);
-          setTab("more");
-          setMorePane("q4");
-        }}
-      />
+      <>
+        <div className="section-head">
+          <h1>MPC</h1>
+          <p>Resume in → pair with companies in and not in your book → research links out.</p>
+        </div>
+        <div className="card">
+          <h2>Receive candidate</h2>
+          <label className="field-label">Name</label>
+          <input
+            className="select"
+            value={mpcForm.name}
+            onChange={(e) => setMpcForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Optional — inferred from resume"
+          />
+          <label className="field-label">Trade</label>
+          <input
+            className="select"
+            value={mpcForm.trade}
+            onChange={(e) => setMpcForm((f) => ({ ...f, trade: e.target.value }))}
+            placeholder="welder, CNC, driver, forklift…"
+          />
+          <label className="field-label">Note (Teams / email / pad)</label>
+          <textarea
+            className="area"
+            rows={2}
+            value={mpcForm.note}
+            onChange={(e) => setMpcForm((f) => ({ ...f, note: e.target.value }))}
+          />
+          <label className="field-label">Resume text</label>
+          <textarea
+            className="area"
+            rows={6}
+            value={mpcForm.resumeText}
+            onChange={(e) => setMpcForm((f) => ({ ...f, resumeText: e.target.value }))}
+            placeholder="Paste resume, or drop a PDF / DOCX / TXT"
+          />
+          <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
+            Attach resume file
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt,.md,application/pdf,text/plain"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                void (async () => {
+                  try {
+                    const text = await readResumeFile(f);
+                    setMpcForm((prev) => ({
+                      ...prev,
+                      resumeText: [prev.resumeText, text].filter(Boolean).join("\n\n"),
+                    }));
+                    flash(`Loaded ${f.name}`);
+                  } catch (err) {
+                    flash(err instanceof Error ? err.message : "Could not read resume");
+                  }
+                })();
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            className="btn btn-primary btn-block btn-lg"
+            style={{ marginTop: "0.65rem" }}
+            disabled={mpcBusy}
+            onClick={() => void submitMpc()}
+          >
+            {mpcBusy ? "Matching…" : "Match to market"}
+          </button>
+        </div>
+        {selected && (
+          <div className="card">
+            <h2>
+              {selected.name} · {selected.trade}
+            </h2>
+            <p>
+              {selected.matches.filter((m) => m.inBook).length} in book ·{" "}
+              {selected.matches.filter((m) => !m.inBook).length} outside book
+            </p>
+            {selected.note && <p className="subtle">{selected.note}</p>}
+            {!selected.matches.length && <p className="empty">No strong matches — try a clearer trade or resume.</p>}
+            {selected.matches.map((m) => (
+              <div key={`${m.companyName}-${m.inBook}`} className="list-item" style={{ alignItems: "stretch" }}>
+                <div style={{ flex: 1 }}>
+                  <strong>
+                    {m.companyName}{" "}
+                    <span className={`chip ${m.inBook ? "chip-first" : "chip-missing"}`}>
+                      {m.inBook ? "In book" : "Not in book"}
+                    </span>
+                  </strong>
+                  <div className="muted">
+                    score {m.score} · {m.why}
+                  </div>
+                  <div className="muted">
+                    {[m.city, m.phone].filter(Boolean).join(" · ") || "Contact research via links"}
+                  </div>
+                  <div className="row wrap" style={{ marginTop: "0.45rem" }}>
+                    {m.researchLinks.slice(0, 5).map((l) => (
+                      <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                        {l.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+                <div className="stack">
+                  <button className="btn btn-primary" onClick={() => addProspectToBook(m)}>
+                    {m.inBook ? "Open" : "Add"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() =>
+                      void copyText(
+                        `MPC: ${selected.name} (${selected.trade})\nCompany: ${m.companyName}\n${m.why}\n${m.researchLinks.map((l) => `${l.label}: ${l.url}`).join("\n")}`,
+                        "MPC match",
+                      )
+                    }
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!!mpc.length && (
+          <div className="card">
+            <h2>Recent candidates</h2>
+            {mpc.slice(0, 8).map((c) => (
+              <button
+                key={c.id}
+                className="list-item"
+                style={{ width: "100%", textAlign: "left" }}
+                onClick={() => setSelectedMpc(c.id)}
+              >
+                <div style={{ flex: 1 }}>
+                  <strong>
+                    {c.name} · {c.trade}
+                  </strong>
+                  <div className="muted">{c.matches.length} matches</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="card">
+          <h2>External research sources</h2>
+          <p>Used on every match. Scout-style boards + local economic sources.</p>
+          <div className="row wrap">
+            {researchLinksFor("Montgomery AL manufacturing hiring").map((l) => (
+              <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                {l.label}
+              </a>
+            ))}
+          </div>
+          <p className="subtle" style={{ marginTop: "0.65rem" }}>
+            Territory seed pack: {TERRITORY_PROSPECTS.length} employers outside a thin book (DAS, HD-HPT, Owens
+            Corning, Lockheed Troy, Koch, US Foods, MOBIS, …).
+          </p>
+        </div>
+      </>
     );
-  } else if (morePane === "blitz") {
-    main = active ? (
-      <BlitzScreen
-        active={active}
-        myScore={myScore}
-        callsDone={callsDone}
-        companies={liveCompanies}
-        scriptOn={scriptOn}
-        scriptIdx={scriptIdx}
-        undo={liveUndo}
-        now={now}
-        onBack={() => setMorePane("home")}
-        onClaim={claim}
-        onDial={dial}
-        onHideScript={() => setScriptOn(false)}
-        onShowScript={() => setScriptOn(true)}
-        onNextScript={() => setScriptIdx((i) => i + 1)}
-        onResult={applyResult}
-        onUndo={undoLast}
-        onSelect={setActiveId}
-      />
-    ) : (
-      <div className="card">
-        <h2>No companies yet</h2>
-        <p>Import Contact Summary and Sales Planner first.</p>
-        <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
-          Go to Import
-        </button>
-      </div>
+  } else if (tab === "accounts") {
+    main = (
+      <>
+        <div className="section-head">
+          <h1>Accounts</h1>
+          <p>
+            Contact Summary book · {bookCount} in book
+            {liveCompanies.length ? ` · ${liveCompanies.length} total` : ""}
+          </p>
+        </div>
+        <div className="search">
+          <span className="subtle">⌕</span>
+          <input
+            placeholder="Search book"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search book"
+          />
+        </div>
+        <div className="card">
+          {!filtered.length && <p className="empty">No companies match.</p>}
+          {filtered.map((c) => (
+            <div key={c.id} className="list-item">
+              <div style={{ flex: 1 }}>
+                <strong>{c.name}</strong>
+                <div className="muted">
+                  {c.contactName || c.contactTitle || "Contact TBD"}
+                  {c.plannerOrder != null ? ` · Planner #${c.plannerOrder}` : ""}
+                  {c.phone ? ` · ${c.phone}` : ""}
+                </div>
+                <BadgeRow c={c} />
+              </div>
+              <div className="stack">
+                <button className="btn btn-primary" onClick={() => dial(c)}>
+                  Call
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setActiveId(c.id);
+                    setMorePane("company");
+                    setTab("more");
+                  }}
+                >
+                  Timeline
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
     );
-  } else if (morePane === "q4") {
-    main = active ? (
-      <Q4Pane active={active} onBack={() => setMorePane("home")} onCopy={(t, l) => void copyText(t, l)} />
-    ) : (
-      <div className="card">
-        <h2>No companies yet</h2>
-        <button className="btn btn-primary btn-block" onClick={() => setMorePane("import")}>
-          Go to Import
+  } else if (tab === "q4") {
+    main = (
+      <>
+        <div className="section-head">
+          <h1>Q4 sheet</h1>
+          <p>
+            {doneCount} of {dayWraps.length} entered in Q4
+          </p>
+        </div>
+        <div className="card">
+          <label className="field-label">Day</label>
+          <input className="select" type="date" value={q4Day} onChange={(e) => setQ4Day(e.target.value)} />
+        </div>
+        {!dayWraps.length && <p className="empty">No wrap-ups on this day.</p>}
+        {dayWraps.map((w) => {
+          const copy = wrapUpCardCopy(w);
+          return (
+            <div key={w.id} className={`card ${w.doneInQ4 ? "dimmed" : ""}`}>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>{w.companyName}</h2>
+                  <p style={{ margin: "0.25rem 0 0" }}>
+                    {w.companyRep || "Rep TBD"} · {w.phone || "No phone"}
+                  </p>
+                </div>
+                <label className="chip">
+                  <input
+                    type="checkbox"
+                    checked={w.doneInQ4}
+                    onChange={(e) =>
+                      setWrapUps((prev) =>
+                        prev.map((x) => (x.id === w.id ? { ...x, doneInQ4: e.target.checked } : x)),
+                      )
+                    }
+                  />{" "}
+                  Done in Q4
+                </label>
+              </div>
+              <h3>Results</h3>
+              <pre className="q4-block">{copy.results}</pre>
+              <button className="btn btn-ghost btn-block" onClick={() => void copyText(copy.results, "Other Results block")}>
+                Copy Results
+              </button>
+              <h3>Future Contact</h3>
+              <pre className="q4-block">{copy.future}</pre>
+              <button className="btn btn-ghost btn-block" onClick={() => void copyText(copy.future, "Other Goals block")}>
+                Copy Future
+              </button>
+            </div>
+          );
+        })}
+      </>
+    );
+  } else if (morePane === "company" && active) {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setTab("accounts")}>
+          ← Accounts
         </button>
-      </div>
+        <div className="section-head">
+          <h1>{active.name}</h1>
+          <p>
+            {[active.address, active.city].filter(Boolean).join(", ") || "Address TBD"}
+            {active.phone ? ` · ${active.phone}` : ""}
+          </p>
+        </div>
+        <BadgeRow c={active} />
+        <div className="row" style={{ margin: "0.75rem 0" }}>
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => dial(active)}>
+            Call
+          </button>
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => openWrap(active, "got_them")}>
+            Wrap-up
+          </button>
+        </div>
+        <div className="card">
+          <h2>Timeline</h2>
+          {!(active.timeline || []).length && !active.notes && <p className="empty">No events yet.</p>}
+          {(active.timeline || [])
+            .slice()
+            .reverse()
+            .map((ev) => (
+              <div key={ev.id} style={{ marginTop: "0.65rem" }}>
+                <strong>{ev.summary}</strong>
+                <div className="subtle">
+                  {ev.kind} · {new Date(ev.at).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT
+                </div>
+                {ev.detail && <div className="muted">{ev.detail}</div>}
+              </div>
+            ))}
+          {active.notes && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <strong>Notes</strong>
+              <pre className="q4-block">{active.notes}</pre>
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <h2>Research</h2>
+          {active.research.length === 0 ? (
+            <p>No research yet</p>
+          ) : (
+            active.research.map((r, i) => (
+              <div key={i} style={{ marginTop: "0.55rem" }}>
+                <strong>{r.fact}</strong>
+                <div className="subtle">
+                  {r.source} · {r.date}
+                </div>
+              </div>
+            ))
+          )}
+          <div className="row wrap" style={{ marginTop: "0.65rem" }}>
+            {researchLinksFor(active.name).slice(0, 8).map((l) => (
+              <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer">
+                {l.label}
+              </a>
+            ))}
+          </div>
+        </div>
+        <div className="card">
+          <h2>Q4 smart copy</h2>
+          <button
+            className="btn btn-ghost btn-block"
+            onClick={() => void copyText(callNoteFields(active, active.lastResult, CALLER)[0].value, "call note")}
+          >
+            Copy call note
+          </button>
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.45rem" }}
+            onClick={() =>
+              void copyText(formatPasteBlock("Q4 COMPANY RECORD", companyRecordFields(active)), "company block")
+            }
+          >
+            Copy company block
+          </button>
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.45rem" }}
+            onClick={() =>
+              void copyText(formatPasteBlock("Q4 JOB ORDER", jobOrderQuickEntryFields(active)), "job order")
+            }
+          >
+            Copy job order block
+          </button>
+        </div>
+      </>
+    );
+  } else if (morePane === "blitz" && active) {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Team desk</h1>
+          <p>Blitz scoring · wrap-up still required after a result</p>
+        </div>
+        <div className="score-strip">
+          <div className="score-cell">
+            <strong>{myScore}</strong>
+            <span>Your points</span>
+          </div>
+          <div className="score-cell">
+            <strong>{toDialCount}</strong>
+            <span>To dial today</span>
+          </div>
+          <div className="score-cell">
+            <strong>{callsDone}</strong>
+            <span>Results</span>
+          </div>
+        </div>
+        <div className="card">
+          <h2>{active.name}</h2>
+          <p>
+            {active.city} · {active.phone || "No phone"}
+          </p>
+          <button className="btn btn-primary btn-block btn-lg" onClick={() => dial(active)}>
+            Call
+          </button>
+        </div>
+        {scriptOn ? (
+          <div className="card script-card">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2>{WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].title}</h2>
+              <button className="btn btn-ghost" onClick={() => setScriptOn(false)}>
+                Hide
+              </button>
+            </div>
+            <p>{scriptIdx === 0 ? openerFor(active) : WEINBERG_CARDS[scriptIdx % WEINBERG_CARDS.length].body}</p>
+            <button className="btn btn-ghost" onClick={() => setScriptIdx((i) => i + 1)}>
+              Next script card
+            </button>
+            <h3 style={{ marginTop: "0.85rem" }}>Objections</h3>
+            {OBJECTION_LINES.map((o) => (
+              <div key={o.id} style={{ marginTop: "0.55rem" }}>
+                <strong>{o.label}</strong>
+                <div className="muted">{o.reply}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <button className="btn btn-ghost btn-block" onClick={() => setScriptOn(true)}>
+            Show scripts
+          </button>
+        )}
+        <div className="card">
+          <h2>Result → wrap-up</h2>
+          <div className="grid-2" style={{ marginTop: "0.75rem" }}>
+            <button className="btn btn-primary btn-lg" onClick={() => applyResult("appointment")}>
+              Got them
+            </button>
+            <button className="btn btn-ghost btn-lg" onClick={() => applyResult("voicemail")}>
+              Voicemail
+            </button>
+            <button className="btn btn-warn btn-lg" onClick={() => applyResult("callback")}>
+              Callback
+            </button>
+            <button className="btn btn-danger btn-lg" onClick={() => applyResult("not_interested")}>
+              Not interested
+            </button>
+          </div>
+          <button className="btn btn-ghost btn-block" style={{ marginTop: "0.55rem" }} onClick={() => applyResult("skip")}>
+            Skip
+          </button>
+        </div>
+        {liveUndo && (
+          <div className="undo-bar">
+            <span>
+              +{liveUndo.points} {liveUndo.label} · undo {Math.ceil((liveUndo.expires - now) / 1000)}s
+            </span>
+            <button className="btn btn-ghost" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} onClick={undoLast}>
+              Undo
+            </button>
+          </div>
+        )}
+      </>
     );
   } else if (morePane === "import") {
+    const roleCounts = recall.files.reduce<Record<string, number>>((acc, f) => {
+      acc[f.role] = (acc[f.role] || 0) + 1;
+      return acc;
+    }, {});
     main = (
-      <ImportPane
-        onBack={() => setMorePane("home")}
-        onManualFiles={(files) => void onManualFiles(files)}
-        onSyncDrive={() => void onSyncDrive()}
-        onPruneNewest={() => void onPruneNewest()}
-        busy={importBusy}
-        recall={recall}
-        onResetDemo={() => {
-          setCompanies([]);
-          setActiveId("");
-          setMyScore(0);
-          setCallsDone(0);
-          setVisitsDone(0);
-          setImportLog("Book cleared — import from Grok Drop");
-          setRecall(emptyRecall());
-          flash("Book cleared");
-        }}
-      />
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Import</h1>
+          <p>Contact Summary = book · Sales Planner = Today queue</p>
+        </div>
+        <button className="btn btn-primary btn-block btn-lg" disabled={!!importBusy} onClick={() => void onSyncDrive()}>
+          {importBusy === "drive" ? "Syncing…" : "Sync Grok Drop (Drive)"}
+        </button>
+        <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
+          {importBusy === "manual" ? "Importing…" : "Pick files from Drop"}
+          <input
+            type="file"
+            multiple
+            disabled={!!importBusy}
+            onChange={(e) => {
+              if (e.target.files?.length) void onManualFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <button
+          className="btn btn-warn btn-block"
+          style={{ marginTop: "0.55rem" }}
+          disabled={!!importBusy || recall.files.length < 2}
+          onClick={() => void onPruneNewest()}
+        >
+          Keep newest only
+        </button>
+        <div className="card" style={{ marginTop: "0.85rem" }}>
+          <h2>Recall</h2>
+          <p>{recall.lastImportLog || "No imports yet"}</p>
+          {Object.entries(roleCounts).map(([role, n]) => (
+            <div key={role} className="row" style={{ justifyContent: "space-between" }}>
+              <span>{ROLE_LABEL[role as keyof typeof ROLE_LABEL] || role}</span>
+              <span className="subtle">{n}</span>
+            </div>
+          ))}
+        </div>
+        <button
+          className="btn btn-ghost btn-block"
+          onClick={() => {
+            setCompanies([]);
+            setActiveId("");
+            setWrapUps([]);
+            setCaptures([]);
+            setMpc([]);
+            setMyScore(0);
+            setCallsDone(0);
+            setVisitsDone(0);
+            setImportLog("Book cleared — import from Grok Drop");
+            setRecall(emptyRecall());
+            flash("Book cleared");
+          }}
+        >
+          Clear book
+        </button>
+      </>
     );
   } else if (morePane === "settings") {
-    main = <SettingsPane dialer={dialer} onDialer={setDialer} onBack={() => setMorePane("home")} />;
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Settings</h1>
+          <p>Office, phone, shared counts</p>
+        </div>
+        <div className="card">
+          <h2>Autodialer</h2>
+          <select className="select" value={dialer} onChange={(e) => setDialer(e.target.value as Dialer)}>
+            <option value="iphone">iPhone (tel:)</option>
+            <option value="aircall">Aircall (stub → tel)</option>
+            <option value="google_voice">Google Voice</option>
+          </select>
+        </div>
+        <div className="card">
+          <h2>Office</h2>
+          <p>{OFFICE.address}</p>
+          <p>
+            Shared label everywhere: <strong>To dial today = {toDialCount}</strong>
+          </p>
+          <p className="subtle">{routeSummary(routeStops)}</p>
+        </div>
+      </>
+    );
   } else {
-    main = <MoreHome onOpen={setMorePane} />;
+    main = (
+      <>
+        <div className="section-head">
+          <h1>More</h1>
+          <p>Montgomery desk · {OFFICE.agentName}</p>
+        </div>
+        <div className="card stack">
+          <button className="btn btn-primary btn-lg btn-block" onClick={() => setMorePane("blitz")}>
+            Team desk / Blitz
+          </button>
+          <button className="btn btn-accent btn-lg btn-block" onClick={() => setMorePane("import")}>
+            Import CRM exports
+          </button>
+          <button className="btn btn-ghost btn-lg btn-block" onClick={() => setMorePane("settings")}>
+            Settings
+          </button>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -1525,43 +1663,28 @@ export default function App() {
         <div className="brand-mark" aria-hidden>
           <IconHome />
         </div>
-        <button
-          type="button"
-          style={{ textAlign: "left", minWidth: 0 }}
-          onClick={() => {
-            setTab("more");
-            setMorePane("home");
-          }}
-        >
+        <div style={{ minWidth: 0 }}>
           <p className="brand-title serif">CliffsCRM</p>
           <p className="brand-sub">
-            {visitsDone} of {OFFICE.visitGoal} visits · {callsDone} of {OFFICE.callGoal} calls
+            To dial today: {toDialCount}
+            {inbox.length ? ` · Inbox ${inbox.length}` : ""}
           </p>
-        </button>
+        </div>
       </header>
 
       <main className="main">{main}</main>
 
-      {tab === "more" && morePane === "blitz" && active && (
-        <button
-          className="fab"
-          aria-label="Suggest"
-          title="Suggest"
-          onClick={() =>
-            void copyText(`Suggest / problem from ${CALLER}\nCompany: ${active.name}\n\nIdea:\n`, "suggest draft")
-          }
-        >
-          ✎
-        </button>
-      )}
+      <button className="fab capture-fab" aria-label="Capture" title="Capture" onClick={() => setCaptureOpen(true)}>
+        +
+      </button>
 
-      <nav className="tabbar" aria-label="Primary">
+      <nav className="tabbar tabbar-5" aria-label="Primary">
         {(
           [
             ["today", "Today", IconHome],
-            ["map", "Map", IconMap],
-            ["calls", "Calls", IconPhone],
-            ["book", "Book", IconBook],
+            ["mpc", "MPC", IconMpc],
+            ["accounts", "Accounts", IconBook],
+            ["q4", "Q4", IconQ4],
             ["more", "More", IconMore],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -1575,13 +1698,69 @@ export default function App() {
             aria-label={label}
           >
             <Icon />
-            <span>{label}</span>
+            <span>
+              {label}
+              {id === "today" && inbox.length ? ` ${inbox.length}` : ""}
+            </span>
           </button>
         ))}
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
       {copySheet && <CopySheet text={copySheet} onClose={() => setCopySheet(null)} />}
+      {captureOpen && (
+        <CaptureSheet
+          companies={liveCompanies}
+          onClose={() => setCaptureOpen(false)}
+          onSave={(item) => {
+            setCaptures((prev) => [item, ...prev]);
+            if (item.companyId) {
+              setCompanies((prev) =>
+                prev.map((c) =>
+                  c.id === item.companyId
+                    ? {
+                        ...c,
+                        timeline: [
+                          ...(c.timeline || []),
+                          {
+                            id: item.id,
+                            at: new Date(item.createdAt).toISOString(),
+                            kind: "capture",
+                            summary: `${item.mode} capture`,
+                            detail: item.text.slice(0, 240),
+                          },
+                        ],
+                      }
+                    : c,
+                ),
+              );
+            }
+            setCaptureOpen(false);
+            flash("Saved to inbox");
+            setTab("today");
+          }}
+        />
+      )}
+      {wrapDraft && (
+        <WrapUpSheet
+          draft={wrapDraft}
+          onChange={setWrapDraft}
+          onClose={() => setWrapDraft(null)}
+          onSaveNext={() => persistWrap(wrapDraft, true)}
+          onSaveStay={() => persistWrap(wrapDraft, false)}
+        />
+      )}
     </div>
   );
 }
+
+// Minimal Web Speech typings used by CaptureSheet
+type SpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  start: () => void;
+  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+};
+type SpeechRecognitionEvent = { results: ArrayLike<ArrayLike<{ transcript: string }>> };

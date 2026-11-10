@@ -1,7 +1,19 @@
 import type { CallResult, Company } from "./data";
 import { OFFICE, resultLabel } from "./data";
+import type { WrapUp } from "./wrapup";
+import { formatFutureCopy, formatResultsCopy } from "./wrapup";
 
 export type Q4Field = { label: string; value: string };
+
+export function wrapUpCardCopy(w: WrapUp): { results: string; future: string; full: string } {
+  const results = formatResultsCopy(w);
+  const future = formatFutureCopy(w);
+  return {
+    results,
+    future,
+    full: `${w.companyName}\n${w.companyRep || ""}\n${w.phone || ""}\n\n${results}\n\n${future}\n`,
+  };
+}
 
 export function companyRecordFields(c: Company): Q4Field[] {
   return [

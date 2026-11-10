@@ -22,8 +22,11 @@ export type Company = {
   territory: string;
   badges: CompanyBadge[];
   lastBilled?: string;
+  lastContacted?: string;
   research: { source: string; date: string; fact: string }[];
   notes: string;
+  /** One timeline per company — wrap-ups, captures, research */
+  timeline?: { id: string; at: string; kind: string; summary: string; detail?: string }[];
   lat?: number;
   lng?: number;
   blitzState: BlitzState;
@@ -32,6 +35,8 @@ export type Company = {
   lastResult?: CallResult;
   lastScore?: number;
   lastCaller?: string;
+  /** YYYY-MM-DD next touch from wrap-up */
+  nextTouch?: string;
   /** Present in Contact Summary (Book of record) */
   inBook?: boolean;
   /** 1-based stop order from Sales Planner; undefined = not on today’s planner */
@@ -72,8 +77,8 @@ export const OFFICE = {
   address: "5729 Carmichael Pkwy, Montgomery AL 36117",
   lat: 32.3593,
   lng: -86.216,
-  visitGoal: 15,
-  callGoal: 20,
+  visitGoal: 20,
+  callGoal: 40,
   agentName: "Cliff Carlisle",
   agentEmail: "Cliff.carlisle@expresspros.com",
 };

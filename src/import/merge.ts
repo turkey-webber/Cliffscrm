@@ -19,12 +19,25 @@ function col(headers: string[], row: string[], names: string[]): string {
 
 function badgesFromRow(headers: string[], row: string[]): CompanyBadge[] {
   const badges: CompanyBadge[] = [];
-  const blob = `${col(headers, row, ["type", "status", "badge", "category"])} ${col(headers, row, ["notes"])}`.toLowerCase();
+  const typeBlob = col(headers, row, ["type", "status", "badge", "category"]).toLowerCase();
+  const notesBlob = col(headers, row, ["notes"]).toLowerCase();
+  const countsAsNew = col(headers, row, ["counts as new", "counts"]).toLowerCase();
+  const blob = `${typeBlob} ${notesBlob}`;
   if (/first.?year|new client/.test(blob)) badges.push("first-year");
   if (/missing/.test(blob)) badges.push("missing");
-  if (/jackpot/.test(blob)) badges.push("jackpot");
+  if (/jackpot|flagged/.test(blob) || /^yes$/i.test(col(headers, row, ["flagged (**)", "flagged"]))) {
+    badges.push("jackpot");
+  }
   if (/prospect/.test(blob)) badges.push("prospect");
-  if (/customer|active|client/.test(blob) && !badges.includes("first-year")) badges.push("active");
+  if (/customer|active/.test(blob) && !badges.includes("first-year") && !badges.includes("missing")) {
+    badges.push("active");
+  }
+  // 2x path: New first-year, or Missing with Counts as new = Yes (6+ months unbilled)
+  if (/^yes$/i.test(countsAsNew) || badges.includes("first-year")) {
+    if (!badges.includes("first-year") && badges.includes("missing")) {
+      /* keep missing; is2x() treats first-year + missing specially via lastBilled */
+    }
+  }
   if (!badges.length) badges.push("prospect");
   return badges;
 }
@@ -37,6 +50,7 @@ function companiesFromContactSummary(table: ParsedTable, fileName: string): { co
     const name = col(table.headers, row, [
       "company",
       "company name",
+      "client name",
       "account",
       "account name",
       "name",

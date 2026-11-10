@@ -51,6 +51,9 @@ export function classifyImport(name: string, mimeType = "", textSample = ""): Im
     return "blitz_research";
   }
   if (/blitz\s*list|blitz\s*board|sales\s*blitz/.test(n)) return "blitz_list";
+  if (/first[-_\s]?year|new[-_\s]?first|counts as new|gm ytd/.test(n) || (isSheet && /counts as new|week first closed|gm ytd/.test(t))) {
+    return "blitz_list";
+  }
   if (
     /contact\s*summary|\bcs[\s._-]?\d|\bcs\s+\d|all[-_]?contacts|contact\s*list/.test(n) ||
     (isSheet && /company|contact|phone|territory/.test(t) && !/blitz/.test(n))
