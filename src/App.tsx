@@ -23,7 +23,15 @@ import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
 import type { RecallStore } from "./import/types";
-import { buildCandidate, matchMpcToMarket, rematchCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
+import {
+  buildCandidate,
+  buildResumeProfile,
+  fitLabelText,
+  matchMpcToMarket,
+  rematchCandidate,
+  type MpcCandidate,
+  type MpcMatch,
+} from "./mpc";
 import { isResumeFileName, resumeSourceLabel } from "./mpc/detect";
 import {
   clearDirectoryHandle,
@@ -868,9 +876,26 @@ export default function App() {
   const selectedLiveMatches = useMemo(
     () =>
       selectedMpcCandidate
-        ? matchMpcToMarket(liveCompanies, selectedMpcCandidate.resumeText, selectedMpcCandidate.trade)
+        ? matchMpcToMarket(
+            liveCompanies,
+            selectedMpcCandidate.resumeText,
+            selectedMpcCandidate.trade,
+            selectedMpcCandidate.name,
+          )
         : [],
     [liveCompanies, selectedMpcCandidate],
+  );
+  const selectedResumeProfile = useMemo(
+    () =>
+      selectedMpcCandidate
+        ? selectedMpcCandidate.profile ||
+          buildResumeProfile({
+            resumeText: selectedMpcCandidate.resumeText,
+            name: selectedMpcCandidate.name,
+            trade: selectedMpcCandidate.trade,
+          })
+        : null,
+    [selectedMpcCandidate],
   );
 
   useEffect(() => {
@@ -878,13 +903,14 @@ export default function App() {
     const next = rematchCandidate(selectedMpcCandidate, liveCompanies);
     const same =
       next.matches.length === selectedMpcCandidate.matches.length &&
+      next.trade === selectedMpcCandidate.trade &&
       next.matches.every(
         (m, i) =>
           m.companyName === selectedMpcCandidate.matches[i]?.companyName &&
-          m.score === selectedMpcCandidate.matches[i]?.score &&
+          m.matchPct === selectedMpcCandidate.matches[i]?.matchPct &&
           m.why === selectedMpcCandidate.matches[i]?.why,
       );
-    if (same && next.trade === selectedMpcCandidate.trade) return;
+    if (same) return;
     setMpc((list) => list.map((c) => (c.id === next.id ? next : c)));
   }, [liveCompanies, selectedMpcCandidate]);
 
@@ -2367,26 +2393,66 @@ export default function App() {
             <h2>
               {selected.name} · {selected.trade}
             </h2>
+            {selectedResumeProfile && (
+              <div className="mpc-profile">
+                <div className="mpc-profile-line">{selectedResumeProfile.summaryLine}</div>
+                {!!selectedResumeProfile.skills.length && (
+                  <div className="row wrap" style={{ marginTop: "0.4rem" }}>
+                    {selectedResumeProfile.skills.slice(0, 10).map((s) => (
+                      <span key={s} className="chip chip-skill">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {!!selectedResumeProfile.titles.length && (
+                  <p className="subtle" style={{ marginTop: "0.35rem" }}>
+                    Work history signals: {selectedResumeProfile.titles.slice(0, 4).join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
             <p>
               {selectedLiveMatches.filter((m) => m.inBook).length} in book ·{" "}
               {selectedLiveMatches.filter((m) => !m.inBook).length} outside book
             </p>
-            <p className="subtle">Ranked by hire likelihood — currently hiring, past fills, then skill fit.</p>
+            <p className="subtle">
+              Zip-style fit — resume skills & work history vs each job need. Great / Good / Fair only.
+            </p>
             {selected.note && <p className="subtle">{selected.note}</p>}
             {!selectedLiveMatches.length && (
-              <p className="empty">No strong matches — try a clearer trade or resume.</p>
+              <p className="empty">No strong matches — resume skills don’t align with open needs yet.</p>
             )}
             {selectedLiveMatches.map((m) => (
-              <div key={`${m.companyName}-${m.inBook}`} className="list-item" style={{ alignItems: "stretch" }}>
-                <div style={{ flex: 1 }}>
-                  <strong>
-                    {m.companyName}{" "}
+              <div key={`${m.companyName}-${m.inBook}`} className="mpc-match list-item">
+                <div className="mpc-match-main">
+                  <div className="mpc-match-top">
+                    <span className={`mpc-fit mpc-fit-${m.fitLabel || "fair"}`}>
+                      {fitLabelText(m.fitLabel || "fair")} · {m.matchPct ?? m.score}%
+                    </span>
+                    {m.hiringNow && <span className="chip chip-jackpot">Hiring now</span>}
                     <span className={`chip ${m.inBook ? "chip-first" : "chip-missing"}`}>
                       {m.inBook ? "In book" : "Not in book"}
                     </span>
-                  </strong>
+                  </div>
+                  <strong className="mpc-job-title">{m.jobTitle || selected.trade}</strong>
+                  <div className="mpc-company">{m.companyName}</div>
                   <div className="muted">{m.why}</div>
-                  <div className="muted">
+                  {!!(m.matchedSkills?.length || m.missingSkills?.length) && (
+                    <div className="row wrap mpc-skills" style={{ marginTop: "0.4rem" }}>
+                      {(m.matchedSkills || []).slice(0, 6).map((s) => (
+                        <span key={`h-${s}`} className="chip chip-skill-hit">
+                          {s}
+                        </span>
+                      ))}
+                      {(m.missingSkills || []).slice(0, 3).map((s) => (
+                        <span key={`m-${s}`} className="chip chip-skill-miss">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="muted" style={{ marginTop: "0.35rem" }}>
                     {[m.city, m.phone].filter(Boolean).join(" · ") || "Contact research via links"}
                   </div>
                   <div className="row wrap" style={{ marginTop: "0.45rem" }}>
@@ -2405,7 +2471,7 @@ export default function App() {
                     className="btn btn-ghost"
                     onClick={() =>
                       void copyText(
-                        `MPC: ${selected.name} (${selected.trade})\nCompany: ${m.companyName}\n${m.why}\n${m.researchLinks.map((l) => `${l.label}: ${l.url}`).join("\n")}`,
+                        `MPC: ${selected.name} (${selected.trade})\n${fitLabelText(m.fitLabel || "fair")} ${m.matchPct}%\n${m.jobTitle} @ ${m.companyName}\n${m.why}\nMatched: ${(m.matchedSkills || []).join(", ")}\n${m.researchLinks.map((l) => `${l.label}: ${l.url}`).join("\n")}`,
                         "MPC match",
                       )
                     }
@@ -2432,7 +2498,7 @@ export default function App() {
                     {c.name} · {c.trade}
                   </strong>
                   <div className="muted">
-                    {matchMpcToMarket(liveCompanies, c.resumeText, c.trade).length} matches
+                    {matchMpcToMarket(liveCompanies, c.resumeText, c.trade, c.name).length} matches
                   </div>
                 </div>
               </button>
