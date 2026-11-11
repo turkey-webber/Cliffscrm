@@ -4851,6 +4851,14 @@ export default function App() {
             Blitz assign <span>→</span>
           </button>
           <p className="menu-group-label">System</p>
+          <a
+            className="menu-link"
+            href="https://turkey-webber.github.io/Cliffscrm/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub desk (always latest) <span>→</span>
+          </a>
           <button className="menu-link" onClick={() => setMorePane("gallery")}>
             Design gallery (36 comps) <span>→</span>
           </button>
