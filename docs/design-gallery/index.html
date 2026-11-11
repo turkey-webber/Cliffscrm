@@ -48,6 +48,34 @@
       line-height: 1.05;
     }
     header.hero p { margin: 0; max-width: 48rem; color: #b7c7bc; line-height: 1.4; font-size: 0.92rem; }
+    .decide-card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      padding: 1rem 1.1rem;
+      margin-bottom: 0.85rem;
+    }
+    .decide-card h3 {
+      font-family: Syne, sans-serif;
+      margin: 0 0 0.55rem;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .decide-card ol, .decide-card ul { margin: 0; padding-left: 1.2rem; color: var(--muted); }
+    .decide-card li { margin: 0.35rem 0; }
+    .decide-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .decide-table th, .decide-table td {
+      text-align: left;
+      padding: 0.55rem 0.4rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .decide-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .decide-table td strong { color: var(--teal); }
     .toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -250,16 +278,18 @@
 </head>
 <body>
   <header class="hero">
-    <div class="kicker">Express · Montgomery · All 36 layouts</div>
+    <div class="kicker">Express · Montgomery · All 36 layouts + decisions</div>
     <h1>Futuristic redesign gallery — see everything</h1>
     <p>
-      Use <strong>All</strong> to scan every comp as thumbnails. Tap any card for a full-size lightbox (← → or Esc).
-      Teal outline = recommended starter. Spec: <code>docs/superpowers/specs/2026-11-11-futuristic-redesign-layouts.md</code>
+      Open this published app from the Cursor app pill (not a repo file path).
+      <strong>Decide</strong> has the recommended stack. <strong>All</strong> shows every comp — tap to zoom (← → / Esc).
+      Teal outline = recommended starter.
     </p>
   </header>
 
   <div class="toolbar" id="tabs">
-    <button type="button" class="on" data-tab="all">All 36</button>
+    <button type="button" class="on" data-tab="decide">Decide</button>
+    <button type="button" data-tab="all">All 36</button>
     <button type="button" data-tab="home">Home</button>
     <button type="button" data-tab="today">Today</button>
     <button type="button" data-tab="mpc">MPC</button>
@@ -333,6 +363,7 @@
     ];
 
     const INTROS = {
+      decide: ["Pick winners", "Recommended stack + checklist. Then open All 36 to compare comps."],
       all: ["All 36 layouts", "Every Home, Today, MPC, Accounts, Q4, and Scout concept. Tap to zoom."],
       home: ["Home — command deck", "Job: open the app and know what to do in under 3 seconds."],
       today: ["Today — dialer & Office/Car", "Weinberg reasons + appointment asks with ← → and thumbs."],
@@ -342,15 +373,25 @@
       scout: ["Scout — hiring intelligence", "Turn signals into dials/visits without board noise."],
     };
 
+    const RECOMMENDED = [
+      ["Home", "1 · Mission Pulse", "Next-action hero + KPIs + widgets in under 3 seconds"],
+      ["Today (Office)", "1 · Dial Cockpit", "Number + reason/ask carousels + thumbs"],
+      ["Today (Car)", "4 · Car HUD", "Navigate / Arrived, low text while driving"],
+      ["MPC", "1 · Fit Leaderboard", "Matches shipped Zip-style Great/Good fit"],
+      ["Accounts", "1 · Search First", "Fastest find → dossier"],
+      ["Q4", "1 · Checklist Focus", "One wrap at a time, goals visible"],
+      ["Scout", "1 · Signal Feed", "Signals → Call/Add without board noise"],
+    ];
+
     const main = document.getElementById("main");
     const tabs = document.getElementById("tabs");
     const countEl = document.getElementById("visible-count");
-    let filter = "all";
+    let filter = "decide";
     let visible = LAYOUTS.slice();
     let lbIndex = 0;
 
     function filtered() {
-      if (filter === "all") return LAYOUTS;
+      if (filter === "all" || filter === "decide") return LAYOUTS;
       const map = { home: "Home", today: "Today", mpc: "MPC", accounts: "Accounts", q4: "Q4", scout: "Scout" };
       return LAYOUTS.filter((l) => l.tool === map[filter]);
     }
@@ -370,14 +411,73 @@
       </article>`;
     }
 
+    function decideHtml() {
+      const recLayouts = LAYOUTS.filter((l) => l.rec);
+      const rows = RECOMMENDED.map(
+        ([tool, pick, why]) =>
+          `<tr><td>${tool}</td><td><strong>${pick}</strong></td><td>${why}</td></tr>`,
+      ).join("");
+      return `
+        <div class="decide-card">
+          <h3>Recommended stack</h3>
+          <table class="decide-table">
+            <thead><tr><th>Tool</th><th>Pick</th><th>Why</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="decide-card">
+          <h3>When you decide</h3>
+          <ol>
+            <li>Pick Home winner (default Mission Pulse)</li>
+            <li>Pick Today Office + Car winners (Dial Cockpit + Car HUD)</li>
+            <li>Confirm MPC Fit Leaderboard stays</li>
+            <li>Confirm Scout under More vs dock</li>
+            <li>Approve lime-on-ink tokens (or request a palette tweak)</li>
+            <li>Then implement shell + Home only</li>
+          </ol>
+        </div>
+        <div class="decide-card">
+          <h3>Direction</h3>
+          <ul>
+            <li>Ink + signal lime Command Deck — futuristic, still one-handed</li>
+            <li>Appointment goal · never invent phones/names/pay · Q4 sacred</li>
+            <li>Discussion only until you pick — no production redesign ship yet</li>
+          </ul>
+        </div>
+        <div class="section-intro"><h2>Recommended comps</h2><p>Tap any to zoom. Open All 36 for the full set.</p></div>
+        <div class="grid">${recLayouts.map((l, i) => cardHtml(l, LAYOUTS.indexOf(l))).join("")}</div>
+      `;
+    }
+
     function render() {
-      visible = filtered();
+      visible = filter === "decide" ? LAYOUTS.filter((l) => l.rec) : filtered();
+      if (filter === "decide") {
+        // Map card data-index to full LAYOUTS indices via decideHtml
+        main.innerHTML = `<section class="section on">${decideHtml()}</section>`;
+        countEl.textContent = "Decide + 7 recommended";
+        main.querySelectorAll(".card").forEach((el) => {
+          el.addEventListener("click", () => {
+            visible = LAYOUTS;
+            openLb(+el.dataset.index);
+          });
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              visible = LAYOUTS;
+              openLb(+el.dataset.index);
+            }
+          });
+        });
+        return;
+      }
       const intro = INTROS[filter];
       const dense = filter === "all" ? " dense" : "";
+      const source = filtered();
+      visible = source;
       main.innerHTML = `
         <section class="section on">
           <div class="section-intro"><h2>${intro[0]}</h2><p>${intro[1]}</p></div>
-          <div class="grid${dense}">${visible.map((l, i) => cardHtml(l, i)).join("")}</div>
+          <div class="grid${dense}">${source.map((l, i) => cardHtml(l, i)).join("")}</div>
         </section>`;
       countEl.textContent = `${visible.length} layouts`;
       main.querySelectorAll(".card").forEach((el) => {
