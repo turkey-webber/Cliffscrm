@@ -207,7 +207,7 @@ button.dial-pill {
   gap: 0.1rem;
 }
 .app-shell.has-daybar .capture-fab {
-  bottom: calc(10.25rem + var(--safe-bottom));
+  bottom: calc(11.5rem + var(--safe-bottom));
 }
 .section-head { margin: 0.15rem 0 0.85rem; }
 .section-head h1 { margin: 0; font-size: 1.55rem; line-height: 1.05; }
@@ -824,6 +824,9 @@ textarea { min-height: 6.5rem; resize: vertical; }
   font-size: 0.88rem;
   max-width: min(90vw, 24rem);
   text-align: center;
+}
+.app-shell.has-daybar .toast {
+  bottom: calc(12.75rem + var(--safe-bottom));
 }
 .file-btn { position: relative; overflow: hidden; }
 .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
