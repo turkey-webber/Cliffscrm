@@ -2,11 +2,17 @@
 
 Mobile-first Express Montgomery desk app (Today · Map · Calls · Book · More).
 
+**Territory Directory** (separate app): see [`territory-directory/README.md`](./territory-directory/README.md) — map/list of territory employers with verified vs signal claims, near-me, blitz pack.
+
 ## Run
 
 ```bash
 npm install
 npm run dev
+```
+
+```bash
+cd territory-directory && npm install && npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
 ## Features
