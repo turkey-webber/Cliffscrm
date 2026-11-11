@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CliffsCRM — Futuristic layout gallery (36 comps)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;650;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #050a08;
+      --paper: #f3f6f4;
+      --line: #c5d0c9;
+      --muted: #5a6b62;
+      --signal: #c8ff3d;
+      --signal-ink: #0d1608;
+      --teal: #0f7a62;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(70% 50% at 100% 0%, #163528 0%, transparent 55%),
+        linear-gradient(180deg, #050a08 0 10.5rem, var(--paper) 10.5rem);
+      min-height: 100vh;
+    }
+    header.hero {
+      color: #eef6f0;
+      padding: 1.4rem 1.25rem 1rem;
+      max-width: 76rem;
+      margin: 0 auto;
+    }
+    .kicker {
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--signal) 80%, white);
+      font-weight: 650;
+    }
+    header.hero h1 {
+      font-family: Syne, sans-serif;
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      margin: 0.35rem 0 0.45rem;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+    }
+    header.hero p { margin: 0; max-width: 42rem; color: #b7c7bc; line-height: 1.45; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      padding: 0.75rem 1.25rem 1rem;
+      max-width: 76rem;
+      margin: 0 auto;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: color-mix(in srgb, #050a08 88%, transparent);
+      backdrop-filter: blur(12px);
+    }
+    .toolbar button {
+      border: 1px solid #2a3b32;
+      background: #0d1612;
+      color: #dce8e0;
+      border-radius: 999px;
+      padding: 0.55rem 0.95rem;
+      font: inherit;
+      font-weight: 650;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .toolbar button.on {
+      background: var(--signal);
+      color: var(--signal-ink);
+      border-color: var(--signal);
+    }
+    main { max-width: 76rem; margin: 0 auto; padding: 0.5rem 1.25rem 3rem; }
+    .section { display: none; }
+    .section.on { display: block; }
+    .section-intro {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      padding: 1rem 1.15rem;
+      margin-bottom: 1.1rem;
+    }
+    .section-intro h2 {
+      font-family: Syne, sans-serif;
+      margin: 0 0 0.35rem;
+      font-size: 1.3rem;
+      letter-spacing: -0.02em;
+    }
+    .section-intro p { margin: 0; color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+      gap: 1.15rem;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 1.1rem;
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      position: relative;
+    }
+    .card.rec { outline: 2px solid var(--teal); outline-offset: 2px; }
+    .badge {
+      position: absolute;
+      top: 0.85rem;
+      right: 0.85rem;
+      background: var(--ink);
+      color: var(--signal);
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.45rem;
+      border-radius: 0.35rem;
+      z-index: 2;
+    }
+    .meta h3 {
+      font-family: Syne, sans-serif;
+      margin: 0;
+      font-size: 1.02rem;
+      letter-spacing: -0.02em;
+      padding-right: 4.8rem;
+    }
+    .meta .thesis { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+    .shot {
+      border-radius: 0.85rem;
+      overflow: hidden;
+      border: 1px solid #1a2a22;
+      background: #0a1210;
+      aspect-ratio: 9 / 16;
+      max-height: 32rem;
+    }
+    .shot img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+    }
+    .footer-note {
+      max-width: 76rem;
+      margin: 0 auto;
+      padding: 0 1.25rem 2.5rem;
+      color: #8fa397;
+      font-size: 0.82rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="kicker">Express · Montgomery · Overnight redesign gallery</div>
+    <h1>36 futuristic layouts — pick winners when you wake</h1>
+    <p>
+      Six comps per major tool. Recommended starters outlined in teal.
+      Direction: ink + signal lime Command Deck that still dials appointments one-handed.
+      Spec: <code>docs/superpowers/specs/2026-11-11-futuristic-redesign-layouts.md</code>
+    </p>
+  </header>
+
+  <div class="toolbar" id="tabs">
+    <button type="button" class="on" data-tab="home">Home ×6</button>
+    <button type="button" data-tab="today">Today ×6</button>
+    <button type="button" data-tab="mpc">MPC ×6</button>
+    <button type="button" data-tab="accounts">Accounts ×6</button>
+    <button type="button" data-tab="q4">Q4 ×6</button>
+    <button type="button" data-tab="scout">Scout ×6</button>
+  </div>
+
+  <main>
+    <section class="section on" id="home">
+      <div class="section-intro">
+        <h2>Home — most useful command deck</h2>
+        <p>Job: open the app and know what to do in under 3 seconds. Primary = next call or next stop.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Mission Pulse</h3><p class="thesis">Next-action hero + KPIs + smart widgets. Best urgency/overview balance.</p></div><div class="shot"><img src="assets/home-01-mission-pulse.jpg" alt="Mission Pulse Home" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Orbital Command</h3><p class="thesis">Radial quick-launch around the active company. High novelty, some speed risk.</p></div><div class="shot"><img src="assets/home-02-orbital-command.jpg" alt="Orbital Command Home" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Day Spine</h3><p class="thesis">Vertical Now → Midday → Close timeline. Strong narrative, longer scan.</p></div><div class="shot"><img src="assets/home-03-day-spine.jpg" alt="Day Spine Home" /></div></article>
+        <article class="card"><div class="meta"><h3>4 · Glass Stack</h3><p class="thesis">Action / Pipeline / Intelligence layers. Premium; watch stack height.</p></div><div class="shot"><img src="assets/home-04-glass-stack.jpg" alt="Glass Stack Home" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Route Ribbon</h3><p class="thesis">Car-day map ribbon + stops. Weaker for pure Office dialing.</p></div><div class="shot"><img src="assets/home-05-route-ribbon.jpg" alt="Route Ribbon Home" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Focus Strip</h3><p class="thesis">Brutalist Now / Next / Later. Max clarity, less spectacle.</p></div><div class="shot"><img src="assets/home-06-focus-strip.jpg" alt="Focus Strip Home" /></div></article>
+      </div>
+    </section>
+
+    <section class="section" id="today">
+      <div class="section-intro">
+        <h2>Today — dialer &amp; Office/Car</h2>
+        <p>Weinberg reasons + appointment asks with ← → and thumbs. Never invent numbers.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Dial Cockpit</h3><p class="thesis">Huge number, reason/ask carousels, thumbs. Appointment machine.</p></div><div class="shot"><img src="assets/today-01-dial-cockpit.jpg" alt="Dial Cockpit" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Split Stage</h3><p class="thesis">Left reason / right ask. Great for coaching; denser on small phones.</p></div><div class="shot"><img src="assets/today-02-split-stage.jpg" alt="Split Stage" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Queue Ribbon</h3><p class="thesis">Horizontal company chips above detail. Fast skip.</p></div><div class="shot"><img src="assets/today-03-queue-ribbon.jpg" alt="Queue Ribbon" /></div></article>
+        <article class="card rec"><span class="badge">Car</span><div class="meta"><h3>4 · Car HUD</h3><p class="thesis">Navigate / Arrived, low text while driving.</p></div><div class="shot"><img src="assets/today-04-car-hud.jpg" alt="Car HUD" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Card Stack</h3><p class="thesis">Swipe stack of call cards. Delightful, less precise.</p></div><div class="shot"><img src="assets/today-05-card-stack.jpg" alt="Card Stack" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Weinberg Theater</h3><p class="thesis">Opener / reason / ask / objections stage. Coaching-heavy.</p></div><div class="shot"><img src="assets/today-06-weinberg-theater.jpg" alt="Weinberg Theater" /></div></article>
+      </div>
+    </section>
+
+    <section class="section" id="mpc">
+      <div class="section-intro">
+        <h2>MPC — resume ↔ market</h2>
+        <p>Zip-style fit first, then company actions.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Fit Leaderboard</h3><p class="thesis">Ranked Great/Good with skill chips — matches shipped product.</p></div><div class="shot"><img src="assets/mpc-01-fit-leaderboard.jpg" alt="Fit Leaderboard" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Resume | Jobs</h3><p class="thesis">Split candidate vs matches. Desktop-strong.</p></div><div class="shot"><img src="assets/mpc-02-resume-jobs.jpg" alt="Resume Jobs" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Match Radar</h3><p class="thesis">Concentric fit rings. Memorable, weaker for many companies.</p></div><div class="shot"><img src="assets/mpc-03-match-radar.jpg" alt="Match Radar" /></div></article>
+        <article class="card"><div class="meta"><h3>4 · Dense Filters</h3><p class="thesis">Filter-first rail + compact rows. Power-user speed.</p></div><div class="shot"><img src="assets/mpc-04-dense-filters.jpg" alt="Dense Filters" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Story Cards</h3><p class="thesis">Large narrative why cards for client talk-tracks.</p></div><div class="shot"><img src="assets/mpc-05-story-cards.jpg" alt="Story Cards" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Compare Tray</h3><p class="thesis">Pin 2–3 companies to compare fit.</p></div><div class="shot"><img src="assets/mpc-06-compare-tray.jpg" alt="Compare Tray" /></div></article>
+      </div>
+    </section>
+
+    <section class="section" id="accounts">
+      <div class="section-intro">
+        <h2>Accounts — book of record</h2>
+        <p>Find fast → dossier. Never invent contacts.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Search First</h3><p class="thesis">Giant search + recent + badges. Classic and fast.</p></div><div class="shot"><img src="assets/accounts-01-search-first.jpg" alt="Search First" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Territory Lanes</h3><p class="thesis">Grouped by city for route thinking.</p></div><div class="shot"><img src="assets/accounts-02-territory-lanes.jpg" alt="Territory Lanes" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Badge Rail</h3><p class="thesis">Jackpot / Missing / First-year filters.</p></div><div class="shot"><img src="assets/accounts-03-badge-rail.jpg" alt="Badge Rail" /></div></article>
+        <article class="card"><div class="meta"><h3>4 · Dense Ledger</h3><p class="thesis">Spreadsheet energy for power users.</p></div><div class="shot"><img src="assets/accounts-04-dense-ledger.jpg" alt="Dense Ledger" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Spotlight</h3><p class="thesis">One account hero + dossier peek.</p></div><div class="shot"><img src="assets/accounts-05-spotlight.jpg" alt="Spotlight" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Activity Feed</h3><p class="thesis">Book as timeline of touches.</p></div><div class="shot"><img src="assets/accounts-06-activity-feed.jpg" alt="Activity Feed" /></div></article>
+      </div>
+    </section>
+
+    <section class="section" id="q4">
+      <div class="section-intro">
+        <h2>Q4 — close the day</h2>
+        <p>Finish wraps, hit goals, no loose ends.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Checklist Focus</h3><p class="thesis">One wrap at a time with goals. Hard to misuse.</p></div><div class="shot"><img src="assets/q4-01-checklist-focus.jpg" alt="Checklist Focus" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Goal Rings</h3><p class="thesis">Visual progress for calls/visits.</p></div><div class="shot"><img src="assets/q4-02-goal-rings.jpg" alt="Goal Rings" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Card Queue</h3><p class="thesis">Swipe through open wraps.</p></div><div class="shot"><img src="assets/q4-03-card-queue.jpg" alt="Card Queue" /></div></article>
+        <article class="card"><div class="meta"><h3>4 · Day Ledger</h3><p class="thesis">Accounting-style day sheet.</p></div><div class="shot"><img src="assets/q4-04-day-ledger.jpg" alt="Day Ledger" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Two-pane Wrap</h3><p class="thesis">Form left, company context right.</p></div><div class="shot"><img src="assets/q4-05-two-pane-wrap.jpg" alt="Two-pane Wrap" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Close Celebration</h3><p class="thesis">When goals hit — brief + reward. Use sparingly.</p></div><div class="shot"><img src="assets/q4-06-close-celebration.jpg" alt="Close Celebration" /></div></article>
+      </div>
+    </section>
+
+    <section class="section" id="scout">
+      <div class="section-intro">
+        <h2>Scout — hiring intelligence</h2>
+        <p>Turn signals into dials/visits without drowning in boards.</p>
+      </div>
+      <div class="grid">
+        <article class="card rec"><span class="badge">Recommended</span><div class="meta"><h3>1 · Signal Feed</h3><p class="thesis">News-style hiring cards → Call/Add.</p></div><div class="shot"><img src="assets/scout-01-signal-feed.jpg" alt="Signal Feed" /></div></article>
+        <article class="card"><div class="meta"><h3>2 · Calendar Spine</h3><p class="thesis">14-day scout calendar planning.</p></div><div class="shot"><img src="assets/scout-02-calendar-spine.jpg" alt="Calendar Spine" /></div></article>
+        <article class="card"><div class="meta"><h3>3 · Leads Board</h3><p class="thesis">Kanban New / Working / Won.</p></div><div class="shot"><img src="assets/scout-03-leads-board.jpg" alt="Leads Board" /></div></article>
+        <article class="card"><div class="meta"><h3>4 · Today10 Focus</h3><p class="thesis">Only ten cards. Forces prioritization.</p></div><div class="shot"><img src="assets/scout-04-today10-focus.jpg" alt="Today10 Focus" /></div></article>
+        <article class="card"><div class="meta"><h3>5 · Prospect Radar</h3><p class="thesis">Outside-book by distance/signal.</p></div><div class="shot"><img src="assets/scout-05-prospect-radar.jpg" alt="Prospect Radar" /></div></article>
+        <article class="card"><div class="meta"><h3>6 · Briefing Console</h3><p class="thesis">Morning intel + paste import.</p></div><div class="shot"><img src="assets/scout-06-briefing-console.jpg" alt="Briefing Console" /></div></article>
+      </div>
+    </section>
+  </main>
+
+  <p class="footer-note">
+    Discussion only — not production UI. Default stack: Mission Pulse · Dial Cockpit + Car HUD · Fit Leaderboard · Search First · Checklist Focus · Signal Feed.
+    Open this file locally from the repo: <code>docs/design-gallery/index.html</code>
+  </p>
+
+  <script>
+    const tabs = document.getElementById("tabs");
+    tabs.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-tab]");
+      if (!btn) return;
+      tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+      document.querySelectorAll(".section").forEach((s) => s.classList.toggle("on", s.id === btn.dataset.tab));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  </script>
+</body>
+</html>
