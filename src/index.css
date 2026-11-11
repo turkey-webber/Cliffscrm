@@ -126,7 +126,7 @@ button.dial-pill {
   margin-top: -0.15rem;
 }
 .app-shell.has-daybar .main {
-  padding-bottom: 9.6rem;
+  padding-bottom: 12.5rem;
 }
 .day-progress {
   display: flex;
@@ -165,24 +165,27 @@ button.dial-pill {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(3.85rem + var(--safe-bottom));
+  bottom: calc(5.1rem + var(--safe-bottom));
   width: min(28rem, calc(100% - 1rem));
   display: grid;
-  grid-template-columns: 1.35fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.4rem;
   padding: 0.5rem;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 0.85rem;
   z-index: 9;
-  box-shadow: none;
+  box-shadow: 0 -6px 24px rgba(11, 21, 17, 0.08);
   touch-action: manipulation;
 }
 .day-action-bar .btn {
-  min-height: 3rem;
-  padding: 0.5rem 0.35rem;
-  font-size: 0.84rem;
+  min-height: 2.85rem;
+  padding: 0.45rem 0.3rem;
+  font-size: 0.82rem;
   font-weight: 700;
+}
+.day-action-bar .btn:nth-child(5) {
+  grid-column: 1 / -1;
 }
 .tab .tab-badge {
   display: inline-grid;
@@ -204,7 +207,7 @@ button.dial-pill {
   gap: 0.1rem;
 }
 .app-shell.has-daybar .capture-fab {
-  bottom: calc(8.15rem + var(--safe-bottom));
+  bottom: calc(10.25rem + var(--safe-bottom));
 }
 .section-head { margin: 0.15rem 0 0.85rem; }
 .section-head h1 { margin: 0; font-size: 1.55rem; line-height: 1.05; }
