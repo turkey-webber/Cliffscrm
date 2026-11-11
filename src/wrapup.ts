@@ -59,7 +59,7 @@ export type WrapUp = {
 export type CaptureItem = {
   id: string;
   createdAt: number;
-  mode: "voice" | "photo" | "type";
+  mode: "voice" | "photo" | "type" | "watch";
   text: string;
   companyId?: string;
   companyGuess?: string;

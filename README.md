@@ -16,6 +16,7 @@ npm run dev
 - CSV import (Contact summary / Planner-style columns)
 - Google / Apple Maps deep links
 - Dialer setting: iPhone / Aircall stub / Google Voice
+- Watch meetings: Apple Shortcut on Watch → transcript into Capture + Meetings library (audio stays in Files; no App Store app)
 - Demo data only until you import — phones never invented
 
 ## Hosting

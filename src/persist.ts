@@ -2,6 +2,7 @@ import { isDemoCompany, type Company, type Dialer } from "./data";
 import type { MpcCandidate } from "./mpc";
 import { DEFAULT_NEWSLETTER_PREFS, type NewsletterPrefs } from "./newsletter";
 import { DEFAULT_SCOUT_PREFS, type ScoutJob, type ScoutPrefs } from "./scout";
+import type { MeetingRecording } from "./watchCapture";
 import type { CaptureItem, WrapUp } from "./wrapup";
 
 export const STORAGE_KEY = "cliffscrm-prototype-v4";
@@ -17,6 +18,8 @@ export type Persisted = {
   autoDialNext: boolean;
   wrapUps: WrapUp[];
   captures: CaptureItem[];
+  /** Watch / phone meeting transcripts (audio stays in Files) */
+  meetings: MeetingRecording[];
   mpc: MpcCandidate[];
   todayMode: "desk" | "car";
   newsletterPrefs: NewsletterPrefs;
@@ -38,6 +41,7 @@ export function defaultPersisted(): Persisted {
     autoDialNext: true,
     wrapUps: [],
     captures: [],
+    meetings: [],
     mpc: [],
     todayMode: "desk",
     newsletterPrefs: { ...DEFAULT_NEWSLETTER_PREFS },
@@ -65,6 +69,7 @@ export function loadState(): Persisted {
       companies,
       wrapUps: Array.isArray(parsed.wrapUps) ? parsed.wrapUps : [],
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
+      meetings: Array.isArray(parsed.meetings) ? (parsed.meetings as MeetingRecording[]).slice(0, 200) : [],
       mpc: Array.isArray(parsed.mpc) ? parsed.mpc : [],
       todayMode:
         parsed.todayMode === "car" || (parsed.todayMode as string) === "truck" ? "car" : "desk",

@@ -105,6 +105,16 @@ import {
   type WrapOutcome,
   type WrapUp,
 } from "./wrapup";
+import {
+  MEETINGS_FOLDER,
+  WATCH_SHORTCUT_STEPS,
+  buildMeetingRecording,
+  captureFromMeeting,
+  isWatchCaptureOpen,
+  watchCaptureUrl,
+  watchTextFromSearch,
+  type MeetingRecording,
+} from "./watchCapture";
 
 type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
 type MorePane =
@@ -121,16 +131,19 @@ type MorePane =
   | "priority"
   | "daily"
   | "scout"
-  | "research";
+  | "research"
+  | "watch";
 type ScoutPane = "brief" | "leads" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
 type TodayMode = "desk" | "car";
 
-const IMPROVE_URL = (() => {
-  if (typeof window === "undefined") return "https://turkey-webber.github.io/Cliffscrm/?open=newsletter-improve";
+const APP_ROOT = (() => {
+  if (typeof window === "undefined") return "https://turkey-webber.github.io/Cliffscrm/";
   const base = import.meta.env.BASE_URL || "/";
-  const root = `${window.location.origin}${base}`.replace(/\/+$/, "/");
-  return `${root}?open=newsletter-improve`;
+  return `${window.location.origin}${base}`.replace(/\/+$/, "/");
 })();
+
+const IMPROVE_URL = `${APP_ROOT}?open=newsletter-improve`;
+const WATCH_CAPTURE_URL = watchCaptureUrl(APP_ROOT);
 
 const LOCK_MS = 10 * 60 * 1000;
 const CALLER = "Cliff";
@@ -459,6 +472,145 @@ function WrapUpSheet({
   );
 }
 
+function guessCompanyFromBlob(companies: Company[], blob: string): { id?: string; name?: string } {
+  const hit = companies.find((c) => {
+    const n = c.name.toLowerCase();
+    return n.length > 3 && blob.toLowerCase().includes(n);
+  });
+  if (hit) return { id: hit.id, name: hit.name };
+  const byContact = companies.find(
+    (c) => c.contactName && blob.toLowerCase().includes(c.contactName.toLowerCase()),
+  );
+  if (byContact) return { id: byContact.id, name: byContact.name };
+  return {};
+}
+
+function WatchIngestSheet({
+  companies,
+  initialText,
+  onSave,
+  onClose,
+}: {
+  companies: Company[];
+  initialText: string;
+  onSave: (meeting: MeetingRecording, capture: CaptureItem) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState(initialText);
+  const [audioName, setAudioName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [clipNote, setClipNote] = useState(
+    initialText ? "Transcript loaded from Watch link" : "Paste the Watch transcript if clipboard is blocked",
+  );
+  const textRef = useRef(initialText);
+  const touchedRef = useRef(!!initialText.trim());
+
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
+
+  useEffect(() => {
+    if (initialText.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const clip = await navigator.clipboard.readText();
+        if (cancelled || !clip.trim()) return;
+        // Never clobber what the user already typed while the permission prompt was open.
+        if (touchedRef.current || textRef.current.trim()) return;
+        setText(clip.trim());
+        setClipNote("Pulled from clipboard");
+      } catch {
+        if (!cancelled && !touchedRef.current) {
+          setClipNote("Clipboard blocked — paste the transcript below");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialText]);
+
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function commit() {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    const guess = guessCompanyFromBlob(companies, trimmed);
+    const meeting = buildMeetingRecording({
+      transcript: trimmed,
+      audioFileName: audioName.trim() || undefined,
+      companyId: guess.id,
+      companyGuess: guess.name,
+    });
+    onSave(meeting, captureFromMeeting(meeting));
+  }
+
+  return (
+    <div
+      className="sheet-overlay"
+      role="dialog"
+      aria-label="Watch meeting"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="sheet-card">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Watch meeting</h2>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <p className="subtle">
+          Audio stays in Files → {MEETINGS_FOLDER}. Transcript lands in Capture inbox + Meetings library.
+        </p>
+        <p className="subtle">{clipNote}</p>
+        <label className="field-label" htmlFor="watch-audio-name">
+          Audio file name (optional)
+        </label>
+        <input
+          id="watch-audio-name"
+          className="field-input"
+          value={audioName}
+          onChange={(e) => setAudioName(e.target.value)}
+          placeholder="Cliff Meet 2026-11-11.m4a"
+        />
+        <textarea
+          className="area"
+          rows={8}
+          value={text}
+          onChange={(e) => {
+            touchedRef.current = true;
+            setText(e.target.value);
+          }}
+          placeholder="Meeting transcript from Watch Shortcut…"
+          style={{ marginTop: "0.65rem" }}
+        />
+        <button
+          type="button"
+          className="btn btn-primary btn-block btn-lg"
+          style={{ marginTop: "0.75rem" }}
+          disabled={!text.trim() || busy}
+          onClick={commit}
+        >
+          Save to inbox + library
+        </button>
+        <p className="subtle" style={{ marginTop: "0.55rem" }}>
+          Tip: you’re recording — disclose when appropriate (AL is one-party consent).
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CaptureSheet({
   companies,
   onSave,
@@ -474,16 +626,7 @@ function CaptureSheet({
   const fileRef = useRef<HTMLInputElement>(null);
 
   function guessCompany(blob: string): { id?: string; name?: string } {
-    const hit = companies.find((c) => {
-      const n = c.name.toLowerCase();
-      return n.length > 3 && blob.toLowerCase().includes(n);
-    });
-    if (hit) return { id: hit.id, name: hit.name };
-    const byContact = companies.find(
-      (c) => c.contactName && blob.toLowerCase().includes(c.contactName.toLowerCase()),
-    );
-    if (byContact) return { id: byContact.id, name: byContact.name };
-    return {};
+    return guessCompanyFromBlob(companies, blob);
   }
 
   function commit(finalText: string, m: CaptureItem["mode"]) {
@@ -607,15 +750,23 @@ function CopySheet({ text, onClose }: { text: string; onClose: () => void }) {
 
 export default function App() {
   const initial = loadState();
+  const bootSearch = typeof window !== "undefined" ? window.location.search : "";
   const openImprove =
     typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("open") === "newsletter-improve";
+    new URLSearchParams(bootSearch).get("open") === "newsletter-improve";
+  const openWatch =
+    typeof window !== "undefined" &&
+    (isWatchCaptureOpen(bootSearch) || !!watchTextFromSearch(bootSearch));
+  const bootWatchText = typeof window !== "undefined" ? watchTextFromSearch(bootSearch) : "";
   const [tab, setTab] = useState<Tab>(openImprove ? "more" : "today");
-  const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : "home");
+  const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : openWatch ? "watch" : "home");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
   const [wrapUps, setWrapUps] = useState<WrapUp[]>(initial.wrapUps);
   const [captures, setCaptures] = useState<CaptureItem[]>(initial.captures);
+  const [meetings, setMeetings] = useState<MeetingRecording[]>(initial.meetings);
+  const [watchIngestOpen, setWatchIngestOpen] = useState(openWatch);
+  const [watchIngestText, setWatchIngestText] = useState(bootWatchText);
   const [mpc, setMpc] = useState<MpcCandidate[]>(initial.mpc);
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string>(initial.companies[0]?.id ?? "");
@@ -747,6 +898,7 @@ export default function App() {
         autoDialNext,
         wrapUps,
         captures,
+        meetings,
         mpc,
         todayMode,
         newsletterPrefs,
@@ -757,7 +909,19 @@ export default function App() {
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
+  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, meetings, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
+
+  // Strip watch/newsletter deep-link params after boot so refresh doesn't re-open sheets.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get("open") && !params.get("watch_text")) return;
+    params.delete("open");
+    params.delete("watch_text");
+    const next = params.toString();
+    const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", url);
+  }, []);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -777,6 +941,7 @@ export default function App() {
     tab === "today" &&
     !wrapDraft &&
     !captureOpen &&
+    !watchIngestOpen &&
     !scriptOpen &&
     (todayMode === "car" ? !!carLead : !!dayLead);
 
@@ -1070,6 +1235,11 @@ export default function App() {
     if (draft.captureId) {
       setCaptures((prev) =>
         prev.map((cap) => (cap.id === draft.captureId ? { ...cap, status: "done" as const } : cap)),
+      );
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.captureId === draft.captureId ? { ...m, status: "filed" as const, companyId: draft.companyId, companyGuess: draft.companyName } : m,
+        ),
       );
     }
     setAssignCaptureId(null);
@@ -3045,6 +3215,7 @@ export default function App() {
             setActiveId("");
             setWrapUps([]);
             setCaptures([]);
+            setMeetings([]);
             setMpc([]);
             setMyScore(0);
             setCallsDone(0);
@@ -4071,6 +4242,138 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "watch") {
+    const inboxMeetings = meetings.filter((m) => m.status === "inbox");
+    const filedMeetings = meetings.filter((m) => m.status !== "inbox");
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Watch meetings</h1>
+          <p>One-tap record on Apple Watch → transcript here · audio in Files</p>
+        </div>
+        <div className="card">
+          <h2>Cliff Meet link</h2>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Put this URL in the Shortcut’s Open URLs step:
+          </p>
+          <pre className="q4-block">{WATCH_CAPTURE_URL}</pre>
+          <button
+            className="btn btn-primary btn-block"
+            style={{ marginTop: "0.55rem" }}
+            onClick={() => void copyText(WATCH_CAPTURE_URL, "Watch capture link")}
+          >
+            Copy capture link
+          </button>
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.45rem" }}
+            onClick={() => {
+              setWatchIngestText("");
+              setWatchIngestOpen(true);
+            }}
+          >
+            Paste a transcript now
+          </button>
+        </div>
+        <div className="card">
+          <h2>Shortcut setup (no App Store)</h2>
+          <ol className="watch-steps">
+            {WATCH_SHORTCUT_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <p className="subtle">
+            You’re recording conversations — disclose when appropriate. Alabama is one-party consent.
+          </p>
+        </div>
+        <div className="panel">
+          <h2>Meetings library</h2>
+          <p className="subtle">
+            {meetings.length
+              ? `${inboxMeetings.length} open · ${filedMeetings.length} filed · audio in ${MEETINGS_FOLDER}`
+              : `Empty — after Cliff Meet, transcripts land here and in Capture inbox`}
+          </p>
+          {meetings.slice(0, 40).map((m) => {
+            const company =
+              (m.companyId ? liveCompanies.find((c) => c.id === m.companyId) : undefined) ||
+              (m.companyGuess ? matchCompany(liveCompanies, m.companyGuess) : undefined);
+            return (
+              <div key={m.id} className="list-item" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div className="row" style={{ width: "100%", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>{m.title}</strong>
+                    <div className="subtle">
+                      {new Date(m.createdAt).toLocaleString("en-US", { timeZone: "America/Chicago" })} CT
+                      {" · "}
+                      {m.status}
+                      {company ? ` · ${company.name}` : m.companyGuess ? ` · ${m.companyGuess}` : ""}
+                    </div>
+                    <div className="muted">{m.transcript.slice(0, 140)}</div>
+                    {m.audioFileName ? (
+                      <div className="subtle">
+                        Audio: {m.audioFolderHint}/{m.audioFileName}
+                      </div>
+                    ) : (
+                      <div className="subtle">Audio folder: {m.audioFolderHint}</div>
+                    )}
+                  </div>
+                </div>
+                <div className="row wrap" style={{ marginTop: "0.45rem", gap: "0.35rem" }}>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => void copyText(m.transcript, "Meeting transcript")}
+                  >
+                    Copy transcript
+                  </button>
+                  {m.status === "inbox" && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => {
+                        if (company) {
+                          setWrapDraft(
+                            blankWrapUp({
+                              companyId: company.id,
+                              companyName: company.name,
+                              phone: company.phone,
+                              companyRep: company.contactName,
+                              futureRep: company.contactName,
+                              outcome: "capture",
+                              otherResults: captureFromMeeting(m).text,
+                              captureId: m.captureId,
+                              callType: "Other call - telephone",
+                            }),
+                          );
+                        } else {
+                          setTab("today");
+                          flash("Assign from Capture inbox on Today");
+                        }
+                      }}
+                    >
+                      {company ? "File" : "Open inbox"}
+                    </button>
+                  )}
+                  {m.status !== "archived" && (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() =>
+                        setMeetings((prev) =>
+                          prev.map((x) => (x.id === m.id ? { ...x, status: "archived" as const } : x)),
+                        )
+                      }
+                    >
+                      Archive
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
   } else {
     main = (
       <>
@@ -4117,6 +4420,9 @@ export default function App() {
           </button>
           <button className="menu-link" onClick={() => setMorePane("import")}>
             Import CRM exports <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("watch")}>
+            Watch meetings <span>→</span>
           </button>
           <button className="menu-link" onClick={() => setMorePane("settings")}>
             Settings <span>→</span>
@@ -4391,6 +4697,42 @@ export default function App() {
             )}
           </div>
         </div>
+      )}
+      {watchIngestOpen && (
+        <WatchIngestSheet
+          companies={liveCompanies}
+          initialText={watchIngestText}
+          onClose={() => setWatchIngestOpen(false)}
+          onSave={(meeting, item) => {
+            setMeetings((prev) => [meeting, ...prev].slice(0, 200));
+            setCaptures((prev) => [item, ...prev]);
+            if (item.companyId) {
+              setCompanies((prev) =>
+                prev.map((c) =>
+                  c.id === item.companyId
+                    ? {
+                        ...c,
+                        timeline: [
+                          ...(c.timeline || []),
+                          {
+                            id: item.id,
+                            at: new Date(item.createdAt).toISOString(),
+                            kind: "capture",
+                            summary: "watch capture",
+                            detail: item.text.slice(0, 240),
+                          },
+                        ],
+                      }
+                    : c,
+                ),
+              );
+            }
+            setWatchIngestOpen(false);
+            flash("Watch meeting saved");
+            setTab("more");
+            setMorePane("watch");
+          }}
+        />
       )}
       {captureOpen && (
         <CaptureSheet
