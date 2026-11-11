@@ -756,13 +756,43 @@ textarea { min-height: 6.5rem; resize: vertical; }
   transform: translateX(-50%);
   bottom: 0;
   width: min(28rem, 100%);
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 0.1rem;
   background: #fff;
   border-top: 1px solid var(--line);
-  padding: 0.3rem 0.3rem calc(0.3rem + var(--safe-bottom));
+  padding: 0.25rem 0 calc(0.2rem + var(--safe-bottom));
   z-index: 8;
+}
+.tabbar-scroll .tabbar-track {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.15rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0 0.45rem;
+  touch-action: pan-x;
+}
+.tabbar-scroll .tabbar-track::-webkit-scrollbar { display: none; }
+.tabbar-scroll .tab {
+  flex: 0 0 auto;
+  width: 4.35rem;
+  scroll-snap-align: start;
+}
+.tabbar-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a9a91;
+  opacity: 0.85;
+  pointer-events: none;
 }
 .tab {
   display: flex;

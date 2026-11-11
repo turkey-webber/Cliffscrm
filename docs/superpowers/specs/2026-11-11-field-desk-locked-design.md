@@ -34,6 +34,15 @@ Ship **Field Desk**: a calm staffing CRM that combines the best of the gallery �
 3. **Now / Next / Later** chips (Focus Strip idea): Now=Today, Next=Q4 or travel, Later=Scout/MPC.  
 4. Primary tools (6): Today, MPC, Scout, Q4, Lists, Capture. Secondary behind More.
 
+## Bottom dock (consolidated)
+
+- **Pinned (always visible first):** Dashboard · Dialer · Today · Scout  
+  - Dialer → Today Office call desk  
+  - Today → Car loop  
+  - Scout → Scout desk  
+- **Swipe/drag left** on the bar for: MPC · Accounts · Q4 · More  
+- Lists / Capture / Brief / Import / Settings stay under Dashboard widgets or More (not every tool on the dock).
+
 ## Finish-line scope (this pass)
 
 - Tokens + copy detox (no military cheese)  

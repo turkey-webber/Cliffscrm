@@ -273,10 +273,27 @@ function IconGrid() {
     </svg>
   );
 }
+function IconDial() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.62 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.19a2 2 0 0 1 2.11-.45c.83.29 1.7.5 2.6.62A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+function IconScout() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
 
 const DOCK_ICONS: Record<DockId, () => ReactNode> = {
   home: IconGrid,
+  dialer: IconDial,
   today: IconHome,
+  scout: IconScout,
   mpc: IconMpc,
   accounts: IconBook,
   q4: IconQ4,
@@ -1788,9 +1805,9 @@ export default function App() {
     main = (
       <>
         <div className="home-hero">
-          <h1>Your day</h1>
+          <h1>Dashboard</h1>
           <p>
-            {OFFICE.agentName.split(" ")[0]} · Express Montgomery — one next step, then the tools you need.
+            {OFFICE.agentName.split(" ")[0]} · Express Montgomery — one next step, then Dialer, Today, or Scout.
           </p>
         </div>
         {nextCompany ? (
@@ -1854,8 +1871,15 @@ export default function App() {
           </div>
         )}
         <div className="home-focus" aria-label="Now next later">
-          <button type="button" className="on" onClick={() => setTab("today")}>
-            Now · Today
+          <button
+            type="button"
+            className="on"
+            onClick={() => {
+              setTodayMode("desk");
+              setTab("today");
+            }}
+          >
+            Now · Dialer
           </button>
           <button
             type="button"
@@ -1929,8 +1953,8 @@ export default function App() {
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Office — call the next company; save wraps as you go"
-              : "Car — navigate stops; Arrived logs the visit"}
+              ? "Dialer (Office) — call the next company; save wraps as you go"
+              : "Today (Car) — navigate stops; Arrived logs the visit"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
@@ -4565,16 +4589,22 @@ export default function App() {
         </button>
         <div className="section-head">
           <h1>Rearrange dock</h1>
-          <p>Choose which shortcuts sit on the bottom bar (max 5).</p>
+          <p>
+            First four stay pinned: Dashboard · Dialer · Today · Scout. Drag the bottom bar left for MPC,
+            Accounts, Q4, More — reorder those here.
+          </p>
         </div>
         <div className="card">
           {dockOrder.map((id, i) => (
             <div key={id} className="dock-edit-row">
-              <strong>{DOCK_META[id].label}</strong>
+              <strong>
+                {DOCK_META[id].label}
+                {i < 4 ? <span className="subtle"> · pinned</span> : null}
+              </strong>
               <button
                 type="button"
                 className="btn btn-ghost"
-                disabled={i === 0}
+                disabled={i === 0 || (i === 4)}
                 onClick={() => setDockOrder((d) => moveDockItem(d, i, -1))}
               >
                 Up
@@ -4582,7 +4612,7 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                disabled={i === dockOrder.length - 1}
+                disabled={i === dockOrder.length - 1 || i === 3}
                 onClick={() => setDockOrder((d) => moveDockItem(d, i, 1))}
               >
                 Down
@@ -4594,7 +4624,7 @@ export default function App() {
             style={{ marginTop: "0.75rem" }}
             onClick={() => setDockOrder([...DEFAULT_DOCK])}
           >
-            Reset to Home · Today · MPC · Accounts · More
+            Reset to Dashboard · Dialer · Today · Scout · …
           </button>
         </div>
       </>
@@ -4687,7 +4717,7 @@ export default function App() {
 
   const brandSub =
     tab === "home"
-      ? "Your day"
+      ? "Dashboard"
       : tab === "mpc"
         ? selectedMpcCandidate
           ? `MPC · ${selectedMpcCandidate.name}`
@@ -4840,38 +4870,72 @@ export default function App() {
         +
       </button>
 
-      <nav className={`tabbar tabbar-${dockOrder.length}`} aria-label="Primary">
-        {dockOrder.map((id) => {
-          const label = DOCK_META[id].label;
-          const Icon = DOCK_ICONS[id];
-          const badge =
-            id === "today"
-              ? toDialCount || inbox.length
-              : id === "mpc"
-                ? mpc.length
-                : id === "q4"
-                  ? q4Pending
-                  : id === "home"
-                    ? hotCount + q4Pending
-                    : 0;
-          return (
-            <button
-              key={id}
-              className={`tab ${tab === id ? "active" : ""}`}
-              onClick={() => {
-                setTab(id);
-                if (id === "more") setMorePane("home");
-              }}
-              aria-label={badge ? `${label}, ${badge}` : label}
-            >
-              <Icon />
-              <span className="tab-label">
-                {label}
-                {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
-              </span>
-            </button>
-          );
-        })}
+      <nav className="tabbar tabbar-scroll" aria-label="Primary">
+        <div className="tabbar-track">
+          {dockOrder.map((id) => {
+            const label = DOCK_META[id].label;
+            const Icon = DOCK_ICONS[id];
+            const isActive =
+              id === "dialer"
+                ? tab === "today" && todayMode === "desk"
+                : id === "today"
+                  ? tab === "today" && todayMode === "car"
+                  : id === "scout"
+                    ? tab === "more" && morePane === "scout"
+                    : id === "more"
+                      ? tab === "more" && morePane !== "scout"
+                      : tab === id;
+            const badge =
+              id === "dialer" || id === "today"
+                ? toDialCount || inbox.length
+                : id === "mpc"
+                  ? mpc.length
+                  : id === "q4"
+                    ? q4Pending
+                    : id === "scout"
+                      ? scoutTen.length
+                      : id === "home"
+                        ? hotCount + q4Pending
+                        : 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`tab ${isActive ? "active" : ""}`}
+                onClick={() => {
+                  if (id === "home") {
+                    setTab("home");
+                  } else if (id === "dialer") {
+                    setTodayMode("desk");
+                    setTab("today");
+                  } else if (id === "today") {
+                    setTodayMode("car");
+                    setTab("today");
+                  } else if (id === "scout") {
+                    setTab("more");
+                    setMorePane("scout");
+                    setScoutPane("brief");
+                  } else if (id === "more") {
+                    setTab("more");
+                    setMorePane("home");
+                  } else {
+                    setTab(id);
+                  }
+                }}
+                aria-label={badge ? `${label}, ${badge}` : label}
+              >
+                <Icon />
+                <span className="tab-label">
+                  {label}
+                  {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="tabbar-hint" aria-hidden="true">
+          Drag left for more
+        </p>
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
