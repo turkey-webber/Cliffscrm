@@ -84,7 +84,7 @@ export function Dossier({
 
       <div className="dossier-body">
         <p className="eyebrow">
-          {c.city} · {c.fence} fence · {c.distanceMi} mi · size {c.sizeBand}
+          {c.city} · {c.fence} fence · {Number(c.distanceMi).toFixed(1)} mi · size {c.sizeBand}
         </p>
         <h1>{c.name}</h1>
         <div className="chip-row">

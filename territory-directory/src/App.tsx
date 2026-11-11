@@ -206,8 +206,9 @@ export default function App() {
                     <strong>{c.name}</strong>
                     <span className={`opp ${opportunityTier(c.opportunityScore)}`}>{c.opportunityScore}</span>
                   </div>
-                  <div className="list-meta">
-                    {c.city} · {c.distanceMi} mi · {c.sizeBand} · {c.activeRoles.length ? "hiring" : "quiet"}
+                    <div className="list-meta">
+                    {c.city} · {Number(c.distanceMi).toFixed(1)} mi · {c.sizeBand} ·{" "}
+                    {c.activeRoles.length ? "hiring" : "quiet"}
                   </div>
                   <div className="chip-row tiny">
                     <span className="chip">{c.bookStatus.replaceAll("_", " ")}</span>
@@ -248,7 +249,7 @@ export default function App() {
                       <span className={`opp ${opportunityTier(c.opportunityScore)}`}>{c.opportunityScore}</span>
                     </div>
                     <div className="list-meta">
-                      {c.distanceMi} mi · {c.city}
+                      {Number(c.distanceMi).toFixed(1)} mi · {c.city}
                     </div>
                   </button>
                 </li>
@@ -272,7 +273,7 @@ export default function App() {
                         {i + 1}. {c.name}
                       </button>
                       <span className="muted">
-                        {c.distanceMi} mi · opp {c.opportunityScore}
+                        {Number(c.distanceMi).toFixed(1)} mi · opp {c.opportunityScore}
                       </span>
                     </li>
                   ))}

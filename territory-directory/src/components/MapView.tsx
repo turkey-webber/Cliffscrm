@@ -34,6 +34,7 @@ export function MapView({ companies, origin, selectedId, onSelect }: Props) {
     }).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
     mapObj.current = map;
+    requestAnimationFrame(() => map.invalidateSize());
     return () => {
       map.remove();
       mapObj.current = null;

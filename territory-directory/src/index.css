@@ -42,13 +42,14 @@ select {
   height: 100%;
   max-width: 720px;
   margin: 0 auto;
-  display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   background: rgba(247, 250, 247, 0.72);
   backdrop-filter: blur(8px);
   border-inline: 1px solid rgba(197, 212, 200, 0.7);
   position: relative;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .topbar {
@@ -59,6 +60,9 @@ select {
   padding: 14px 16px 8px;
   background: linear-gradient(180deg, rgba(15, 47, 28, 0.96), rgba(15, 47, 28, 0.88));
   color: #f3faf5;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
 }
 
 .brand {
@@ -80,6 +84,15 @@ select {
   grid-template-columns: 1fr auto auto;
   gap: 8px;
   padding: 10px 12px;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+}
+
+.radius-row {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
 }
 
 .search,
@@ -102,6 +115,10 @@ label select {
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 12px 8px;
+}
+
+.chip-row {
+  position: relative;
 }
 
 .chip-row.tiny {
@@ -128,8 +145,10 @@ label select {
 
 .main {
   min-height: 0;
+  flex: 1;
   position: relative;
   overflow: auto;
+  z-index: 1;
 }
 
 .main.tab-map {
@@ -260,6 +279,9 @@ label select {
   gap: 4px;
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   background: rgba(15, 47, 28, 0.96);
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
 }
 
 .tabbar button {
@@ -342,7 +364,7 @@ label select {
   background: rgba(11, 31, 20, 0.45);
   display: grid;
   align-items: end;
-  z-index: 30;
+  z-index: 5000;
 }
 
 .sheet-card {
@@ -379,7 +401,7 @@ fieldset {
 .dossier {
   position: absolute;
   inset: 0;
-  z-index: 40;
+  z-index: 6000;
   background: #f3f7f4;
   display: grid;
   grid-template-rows: auto 1fr;
