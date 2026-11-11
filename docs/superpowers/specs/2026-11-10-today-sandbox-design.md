@@ -13,7 +13,7 @@ Give Cliff an iPhone-width Today screen he can open without touching his real bo
 1. Locked and scheduled meetings.
 2. Scheduled callbacks.
 
-Each card shows company, contact, time, and purpose as separate lines. A banner states that every record is synthetic example data. Phone actions stay off. Nothing on this screen reads or writes the live desk.
+Each card shows company, contact, time, and purpose as separate lines. The ordered cards are a queue: one current card, then the rest under Up next. Dismiss, Skip, and Complete are the only actions. Complete can take a voice note or a typed note, and a Job order box filters that note into job-order fields. A banner states that every record is synthetic example data. Phone actions stay off. Nothing on this screen reads or writes the live desk.
 
 ## Recommended approach
 
@@ -35,6 +35,7 @@ Future files, not created here:
 
 - `src/sandbox/todayFixtures.ts` — exports `TODAY_SANDBOX_FIXTURES`, the constant fictional cards.
 - `src/sandbox/orderTodaySandbox.ts` — pure ordering and demo-day label.
+- `src/sandbox/queueTodaySandbox.ts` — pure queue steps and job-order note filter.
 - `src/sandbox/TodaySandbox.tsx` — the only sandbox view.
 - A conditional in `src/main.tsx` that renders either the sandbox or `App`.
 
@@ -53,10 +54,11 @@ Styles sit under a root class `today-sandbox`. They must not change selectors th
   → main.tsx gate
   → TodaySandbox
   → orderTodaySandbox(TODAY_SANDBOX_FIXTURES, now)
-  → banner + h1 + demo-day label + meetings + callbacks
+  → queue state in memory
+  → banner + h1 + demo-day label + current card + Up next
 ```
 
-`now` is the only runtime input. The view passes `new Date()`. Tests pass a frozen `Date`. Fixtures are not props from `App`. There is no refresh, sync, edit, complete, or reorder control.
+`now` is the only clock input. The view passes `new Date()`. Tests pass a frozen `Date`. Fixtures are not props from `App`. Queue position, notes, and the Job order box live in component memory for the page session. Reload restores the original order. There is no sync and no drag reorder.
 
 ```ts
 type SandboxCard = {
@@ -163,7 +165,34 @@ Empty sections stay visible so the two groups do not collapse:
 
 An empty fixture array shows the banner, the `h1`, the demo-day line, and both empty lines. It does not show Sync Drop, Hot Sheet, Q4, Scout, or “Nothing left on Today.”
 
-Each card ends with `<button type="button" disabled>` whose visible text and accessible name are `Phone disabled, example data only`. The control is at least 44 by 44 CSS pixels and may wrap onto more than one line. The rendered sandbox contains no `tel:` URL and no Google Voice URL.
+The current card ends with a disabled phone button, then Dismiss, Skip, and Complete. The phone button’s visible text and accessible name are `Phone disabled, example data only`. It is at least 44 by 44 CSS pixels and may wrap. The rendered sandbox contains no `tel:` URL and no Google Voice URL. Up next rows have no buttons.
+
+## Queue
+
+The canonical order is the queue. One card is current. The others still pending on this pass are Up next, meetings before callbacks. Up next shows a group heading only when that group still has a pending row. The current card shows `Card N of 8` for a canonical card, using that card’s place in the original eight, plus `Meeting` or `Callback`, the four lines, `Locked` when required, the disabled phone button, and the three actions. A deferred card keeps its original number when it returns.
+
+- **Dismiss** removes the card for this page session. No note. The next pending card becomes current.
+- **Skip** marks the card deferred and moves to the next pending card. No note. Deferred cards stay out of Up next. When no pending card remains, deferred cards start a new pass in the original meetings-then-callbacks order, and the first of those becomes current. Skipping the only card in a pass leaves it current and shows `Only example card left in this pass.`
+- **Complete** opens the note step on this card and does not advance. **Cancel** closes the note and leaves the card current. **Save** stores the note in memory, marks the card completed, and advances. An empty note is allowed. Dismissed and completed cards do not return.
+
+Voice uses the browser speech API already used by Capture (`SpeechRecognition` or `webkitSpeechRecognition`, `en-US`). The transcript is appended to the note. If that API is missing, the note shows `Voice not available here — type the note.` and Type still works. Audio is not uploaded. The note step has Voice and Type only.
+
+The note step includes a checkbox labeled `Job order`, unchecked by default. Unchecked, the step shows the full note. Checked, the full note stays stored but the visible details are only these fields, in this order, matching `jobOrderQuickEntryFields` in `src/q4.ts`:
+
+1. Company Name — the card company, or `Company missing on example card`.
+2. Department — remainder of the sentence after `department` or `dept`.
+3. Order Placer — the card contact, or the remainder after `ordered by` or `placer`, or `Not in example note`.
+4. Phone — always `Phone disabled, example data only`.
+5. Job Title — remainder after `title`, `role`, or `position`.
+6. # needed — the first integer immediately before `needed`, `associates`, or `people`.
+7. Projected start — remainder after `starting` or `start`.
+8. Reason for opening — remainder after `because` or `reason`.
+9. Skills required — remainder after `skill` or `needs`.
+10. Salary Low / Mid / Top — remainder after `pay`, `salary`, or `wage`.
+
+Try the longer keyword before the shorter one in the same field (`starting` before `start`, `department` before `dept`). A remainder drops a leading `is`, `was`, or `:`, and stops at the period. No match shows `Not in example note`. Any run of 7 or more digits is removed before display and is never placed in a field. Unchecking Job order shows the full note again.
+
+When no pending or deferred card remains, the banner and demo day stay, and the queue says `Queue clear for this example day.`
 
 ## Mobile readability and accessibility
 
@@ -185,8 +214,9 @@ Each card ends with `<button type="button" disabled>` whose visible text and acc
 - Merging this spec branch to `main`.
 - Credentials, connectors, `fetch`, storage reads or writes, and real prospect, person, phone, or appointment data.
 - Maps, calling, auto-dial, Aircall, Google Voice, `tel:` links, and enabling the phone button.
-- Editing, completing, snoozing, or reordering cards.
-- Blitz locks, scores, capture, and the live empty-state Sync Drop button.
+- Saving a sandbox note into the live book, Q4, the clipboard, or any server.
+- Photo capture, maps, and drag reorder.
+- Blitz locks, scores, the live Capture inbox, and the live empty-state Sync Drop button.
 - A second Pages site, a new path route, or a React Router migration.
 
 ## Acceptance criteria
@@ -199,12 +229,15 @@ These are the checks for a later implementation. This document does not add them
 4. A record with `kind: "visit"` is omitted. A callback with `locked: true` stays in callbacks and has no Locked badge. Duplicate ids are both kept.
 5. Passing a later `now` on the same Chicago date does not change either list.
 6. The order module calls `toLocaleDateString` with `timeZone: "America/Chicago"`. Its source does not contain `getHours`, `getUTCHours`, `getDate`, `getUTCDate`, or the matching month, year, or weekday getters. The four frozen instants then return the demo days in the table on any runner time zone.
-7. The rendered canonical screen shows the exact banner sentences, `Demo day` plus `America/Chicago`, eight cards, missing-field sentences for the blank cells, `Locked` on `ex-m-01` and `ex-m-03` only, and `9:00 AM CT`, `4:00 PM CT`, `8:15 AM CT`, and `1:00 PM CT` on the timed cards.
+7. The rendered canonical screen shows the exact banner sentences, `Demo day` plus `America/Chicago`, current card `ex-m-01`, and Up next in the remaining canonical order. Missing-field sentences, `Locked` on `ex-m-01` and `ex-m-03` only, and the clock labels `9:00 AM CT`, `4:00 PM CT`, `8:15 AM CT`, and `1:00 PM CT` still appear on those cards.
 8. An empty array renders both empty-state sentences and no Sync Drop copy. A meetings-only slice still renders the callback empty sentence, and the reverse.
 9. The phone control is disabled, its accessible name is `Phone disabled, example data only`, and the sandbox output contains neither `tel:` nor `voice.google.com`.
 10. Importing the sandbox view does not import `src/App.tsx`, `src/persist.ts`, `src/import/recall.ts`, `src/flow.ts`, or `api/`. Rendering it does not call `fetch` or touch `cliffscrm-prototype-v4`, `cliffscrm-prototype-v3`, `cliffscrm-prototype-v2`, or `cliffscrm-recall-v1`.
 11. With `?sandbox=today`, `App` is not rendered. Without that exact flag, the sandbox is not rendered and the current desk still mounts. `?sandbox=today&open=newsletter-improve` does not mount `App`.
-12. At 320px and 390px width the page has no horizontal scroll, the four card lines are visible, and the phone control is at least 44 by 44 CSS pixels.
+12. At 320px and 390px width the page has no horizontal scroll, the four card lines are visible, and Dismiss, Skip, Complete, and the phone control are each at least 44 by 44 CSS pixels.
+13. On the canonical queue, the current card is `ex-m-01` and the action labels are `Dismiss`, `Skip`, and `Complete`. Dismiss removes that id for the session and makes `ex-m-02` current. Skip defers `ex-m-01` until no pending card remains, then returns it before any still-deferred callback. Complete opens the note step and does not advance until Save. Cancel returns to the same card.
+14. The note step offers `Voice` and `Type` only. With no speech API, the note shows `Voice not available here — type the note.` Voice and typing write the same note string. An empty Save still advances. The stored note is gone after reload.
+15. With Job order unchecked, the note step shows the full text. With Job order checked, it shows only the ten job-order fields below. For card `ex-m-01` and the note `Department is example shipping. Title is example picker. 2 needed. Starting Monday. Skill is forklift. Pay is example range only. Weather was nice. Call 5550100199.` the values are: Company Name `Example North Works`; Department `example shipping`; Order Placer `Example Person A`; Phone `Phone disabled, example data only`; Job Title `example picker`; # needed `2`; Projected start `Monday`; Reason for opening `Not in example note`; Skills required `forklift`; Salary Low / Mid / Top `example range only`. The words `Weather was nice` and the digits `5550100199` appear nowhere in the filtered fields. Unchecking Job order shows the full note again, including those words.
 
 ## Review gate
 
