@@ -46,6 +46,9 @@ function json(data: unknown, status = 200) {
 }
 
 export async function POST(request: Request) {
+  const identity = await requireIdentity(request);
+  if (identity instanceof Response) return identity;
+
   let body: Body = {};
   try {
     body = (await request.json()) as Body;
@@ -66,17 +69,6 @@ export async function POST(request: Request) {
       provider: "app",
       dossier: { ...dossier, provider: "app" },
       message: "GROK_API_KEY not set — using app dossier",
-    });
-  }
-
-  const identity = await requireIdentity(request);
-  if (identity instanceof Response) {
-    return json({
-      ok: true,
-      configured: true,
-      provider: "app",
-      dossier: { ...dossier, provider: "app" },
-      message: "Sign in required for Grok dossier — using app dossier",
     });
   }
 
@@ -195,7 +187,10 @@ Reply JSON only:
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const identity = await requireIdentity(request);
+  if (identity instanceof Response) return identity;
+
   const keyed = !!(process.env.GROK_API_KEY || process.env.XAI_API_KEY);
   return json({
     ok: true,
