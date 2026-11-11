@@ -75,7 +75,7 @@ import {
   type NewsletterPrefs,
   DEFAULT_NEWSLETTER_PREFS,
 } from "./newsletter";
-import { researchLinksFor, TERRITORY_PROSPECTS } from "./research";
+import { buildStarterDesk, researchLinksFor, TERRITORY_PROSPECTS } from "./research";
 import { FRONT_DESK_LINE, OBJECTION_LINES, WEINBERG_CARDS, openerFor } from "./scripts";
 import {
   applyDossierToCompany,
@@ -403,6 +403,15 @@ function WrapUpSheet({
             className="select"
             value={draft.companyRep}
             onChange={(e) => onChange({ ...draft, companyRep: e.target.value })}
+            placeholder="Name you spoke with"
+          />
+          <label className="field-label">Phone on file</label>
+          <input
+            className="select"
+            value={draft.phone}
+            onChange={(e) => onChange({ ...draft, phone: e.target.value })}
+            placeholder="Only if they gave it — never invent"
+            inputMode="tel"
           />
           <div className="grid-2" style={{ marginTop: "0.55rem" }}>
             <div>
@@ -713,6 +722,13 @@ export default function App() {
   const [recall, setRecall] = useState<RecallStore>(() => loadRecall());
   const [importBusy, setImportBusy] = useState<string | null>(null);
   const [wrapDraft, setWrapDraft] = useState<WrapUp | null>(null);
+  const [editDraft, setEditDraft] = useState<{
+    id: string;
+    phone: string;
+    contactName: string;
+    contactTitle: string;
+    address: string;
+  } | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [q4Day, setQ4Day] = useState(todayIso());
   const [mpcForm, setMpcForm] = useState({ name: "", trade: "", note: "", resumeText: "" });
@@ -835,7 +851,6 @@ export default function App() {
   const toDialCount = dialList.length;
   const routeStops = useMemo(() => buildRouteStops(nextList, 8), [nextList]);
   const inbox = captures.filter((c) => c.status === "inbox");
-  const staleInbox = inbox.filter((c) => now - c.createdAt > 24 * 60 * 60 * 1000);
   const dayWraps = wrapUps.filter((w) => w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day);
   const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
   const q4Pending = dayWraps.filter((w) => !w.doneInQ4).length;
@@ -1202,6 +1217,8 @@ export default function App() {
           Boolean(draft.futureDate && draft.futureDate <= today) ||
           (lastResult === "callback" && !draft.futureDate);
         const noteLine = `${draft.resultDate} · ${CALLER}: ${draft.otherResults || resultLabel(lastResult)}`;
+        const rep = draft.companyRep.trim();
+        const phone = draft.phone.trim();
         return {
           ...c,
           blitzState: reopen ? ("open" as const) : ("called" as const),
@@ -1212,6 +1229,8 @@ export default function App() {
           nextTouch: draft.futureDate,
           lockedBy: undefined,
           lockUntil: undefined,
+          contactName: rep || c.contactName,
+          phone: phone || c.phone,
           notes: [c.notes, noteLine].filter(Boolean).join("\n"),
           timeline: [...(c.timeline || []), event],
         };
@@ -1325,8 +1344,8 @@ export default function App() {
   function dial(c: Company) {
     claim(c.id);
     if (!c.phone) {
-      flash("No phone on file — open wrap-up or edit in Accounts");
-      openWrap(c, "got_them");
+      flash("No phone on file — add it only if they gave it");
+      openContactEdit(c);
       return;
     }
     if (dialer === "google_voice") {
@@ -1388,6 +1407,51 @@ export default function App() {
     setTodayMode("car");
     setTab("today");
     flash(`${c.name} · ${companyTypeLabel(c)} added to travel list`);
+  }
+
+  /** Cold open: territory employers with phones already on file — never invents numbers. */
+  function loadStarterDesk() {
+    const starter = buildStarterDesk();
+    if (!starter.length) {
+      flash("No territory phones on file — import Contact Summary");
+      return;
+    }
+    setCompanies((prev) => {
+      const byName = new Map(prev.map((c) => [c.name.toLowerCase(), c]));
+      const merged = [...prev];
+      for (const row of starter) {
+        const key = row.name.toLowerCase();
+        if (byName.has(key)) continue;
+        merged.push(row);
+        byName.set(key, row);
+      }
+      return merged;
+    });
+    setTodayMode("desk");
+    setTab("today");
+    flash(`Starter desk · ${starter.length} employers with phones on file`);
+  }
+
+  function openContactEdit(c: Company) {
+    setEditDraft({
+      id: c.id,
+      phone: c.phone || "",
+      contactName: c.contactName || "",
+      contactTitle: c.contactTitle || "",
+      address: c.address || "",
+    });
+  }
+
+  function saveContactEdit() {
+    if (!editDraft) return;
+    patchCompany(editDraft.id, {
+      phone: editDraft.phone.trim(),
+      contactName: editDraft.contactName.trim(),
+      contactTitle: editDraft.contactTitle.trim(),
+      address: editDraft.address.trim(),
+    });
+    setEditDraft(null);
+    flash("Contact updated — only what you entered");
   }
 
   const travelMatches = useMemo(
@@ -1858,16 +1922,45 @@ export default function App() {
         ) : (
           <div className="demo-banner" style={{ marginBottom: "0.85rem" }}>
             {liveCompanies.length
-              ? "Nothing queued — sync Drop, open Lists, or add a travel stop."
-              : "Sync Contact Summary + Sales Planner from Drop to start the day."}
-            <button
-              className="btn btn-accent btn-block"
-              style={{ marginTop: "0.65rem" }}
-              disabled={!!importBusy}
-              onClick={() => (liveCompanies.length ? setTab("today") : void onSyncDrive())}
-            >
-              {liveCompanies.length ? "Open Today" : importBusy === "drive" ? "Syncing…" : "Sync Drop"}
-            </button>
+              ? "Nothing queued — open Lists, add a travel stop, or load territory phones."
+              : "Start the day: load Montgomery employers with phones on file, or import Contact Summary."}
+            {!liveCompanies.length ? (
+              <>
+                <button
+                  className="btn btn-primary btn-block"
+                  style={{ marginTop: "0.65rem" }}
+                  onClick={() => loadStarterDesk()}
+                >
+                  Load starter desk
+                </button>
+                <button
+                  className="btn btn-accent btn-block"
+                  style={{ marginTop: "0.45rem" }}
+                  disabled={!!importBusy}
+                  onClick={() => void onSyncDrive()}
+                >
+                  {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+                </button>
+                <button
+                  className="btn btn-ghost btn-block"
+                  style={{ marginTop: "0.45rem" }}
+                  onClick={() => {
+                    setTab("more");
+                    setMorePane("import");
+                  }}
+                >
+                  Import files
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-accent btn-block"
+                style={{ marginTop: "0.65rem" }}
+                onClick={() => setTab("today")}
+              >
+                Open Today
+              </button>
+            )}
           </div>
         )}
         <div className="home-focus" aria-label="Now next later">
@@ -1945,28 +2038,47 @@ export default function App() {
       </>
     );
   } else if (tab === "today") {
-    const deskItems = nextList;
-    const lead = deskItems[0];
+    const hotIds = new Set(buildHotSheet(liveCompanies).map((r) => r.company.id));
+    const quietIds = new Set(buildGoneQuiet(liveCompanies).map((r) => r.company.id));
+    const leadIds = new Set(jobOrderLeads.map((r) => r.company.id));
+    const scoutNames = new Set(scoutTen.map((j) => j.company.toLowerCase()));
+    const deskItems = nextList.filter((n) => {
+      if (todayFilter === "all") return true;
+      if (todayFilter === "hot") return hotIds.has(n.company.id);
+      if (todayFilter === "quiet") return quietIds.has(n.company.id);
+      if (todayFilter === "leads") return leadIds.has(n.company.id);
+      if (todayFilter === "plan") return n.company.plannerOrder != null;
+      if (todayFilter === "scout") {
+        return (
+          scoutNames.has(n.company.name.toLowerCase()) ||
+          n.company.id.startsWith("territory-") ||
+          n.company.research.some((r) => /scout|hiring|job|posting/i.test(`${r.source} ${r.fact}`))
+        );
+      }
+      if (todayFilter === "q4") return wrapUps.some((w) => w.companyId === n.company.id && !w.doneInQ4);
+      return true;
+    });
+    const lead = deskItems[0] ?? nextList[0];
     main = (
       <>
         <div className="section-head">
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Dialer (Office) — call the next company; save wraps as you go"
-              : "Today (Car) — navigate stops; Arrived logs the visit"}
+              ? "Dialer — call next, wrap, next. Goal = appointment."
+              : "Car — navigate stops; Arrived logs the visit"}
+            {` · ${deskItems.length} in view`}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
-            {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
         </div>
         <div className="filter-rail" role="toolbar" aria-label="Today filters">
           {(
             [
-              ["all", "All", 0],
+              ["all", "All", nextList.length],
               ["hot", "Hot", hotCount],
               ["quiet", "Quiet", goneCount],
               ["leads", "Leads", jobOrderLeads.length],
-              ["plan", "Plan", 0],
+              ["plan", "Plan", nextList.filter((n) => n.company.plannerOrder != null).length],
               ["scout", "Scout", scoutTen.length],
               ["q4", "Q4", q4Pending],
             ] as const
@@ -1975,32 +2087,7 @@ export default function App() {
               key={id}
               type="button"
               className={`filter-chip ${todayFilter === id ? "active" : ""}`}
-              onClick={() => {
-                setTodayFilter(id);
-                if (id === "hot") {
-                  setTab("more");
-                  setMorePane("lists");
-                  setListsFilter("hot");
-                } else if (id === "quiet") {
-                  setTab("more");
-                  setMorePane("lists");
-                  setListsFilter("gone");
-                } else if (id === "leads") {
-                  setTab("more");
-                  setMorePane("scout");
-                  setScoutPane("leads");
-                } else if (id === "plan") {
-                  setTab("more");
-                  setMorePane("scout");
-                  setScoutPane("plan");
-                } else if (id === "scout") {
-                  setTab("more");
-                  setMorePane("scout");
-                  setScoutPane("briefing");
-                } else if (id === "q4") {
-                  setTab("q4");
-                }
-              }}
+              onClick={() => setTodayFilter(id)}
             >
               {label}
               {count ? <span className="count">{Math.min(count, 99)}</span> : null}
@@ -2087,34 +2174,53 @@ export default function App() {
         </div>
         {!deskItems.length && (
           <div className="demo-banner">
-            {liveCompanies.length
-              ? "Nothing left on Today — finish Q4 or pull Hot / Gone quiet."
-              : "One tap loads Contact Summary + Sales Planner from Drop."}
+            {!liveCompanies.length
+              ? "Empty desk — load Montgomery employers with phones on file, or import Contact Summary."
+              : todayFilter !== "all"
+                ? "Nothing in this filter — try All."
+                : "Queue clear — finish Q4 or open Lists."}
             {!liveCompanies.length ? (
-              <button
-                className="btn btn-accent btn-block btn-lg"
-                style={{ marginTop: "0.65rem" }}
-                disabled={!!importBusy}
-                onClick={() => void onSyncDrive()}
-              >
-                {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
-              </button>
+              <>
+                <button
+                  className="btn btn-primary btn-block btn-lg"
+                  style={{ marginTop: "0.65rem" }}
+                  onClick={() => loadStarterDesk()}
+                >
+                  Load starter desk
+                </button>
+                <button
+                  className="btn btn-accent btn-block"
+                  style={{ marginTop: "0.45rem" }}
+                  disabled={!!importBusy}
+                  onClick={() => void onSyncDrive()}
+                >
+                  {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+                </button>
+                <button
+                  className="btn btn-ghost btn-block"
+                  style={{ marginTop: "0.45rem" }}
+                  onClick={() => {
+                    setTab("more");
+                    setMorePane("import");
+                  }}
+                >
+                  Import files
+                </button>
+              </>
             ) : (
               <div className="row" style={{ marginTop: "0.65rem", gap: "0.45rem" }}>
+                {todayFilter !== "all" ? (
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setTodayFilter("all")}>
+                    Show all
+                  </button>
+                ) : null}
                 {q4Pending > 0 ? (
                   <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setTab("q4")}>
                     Q4 sheet
                   </button>
                 ) : null}
-                <button
-                  className="btn btn-ghost"
-                  style={{ flex: 1 }}
-                  onClick={() => {
-                    setTab("more");
-                    setMorePane("hot");
-                  }}
-                >
-                  Hot Sheet
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => loadStarterDesk()}>
+                  Add territory phones
                 </button>
               </div>
             )}
@@ -2131,6 +2237,22 @@ export default function App() {
                 {lead.company.contactTitle ? ` · ${lead.company.contactTitle}` : ""}
               </p>
               <p className="dial-phone mono">{lead.company.phone || "No phone on file"}</p>
+              <div className="row wrap" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
+                <button type="button" className="btn btn-ghost" onClick={() => openContactEdit(lead.company)}>
+                  Edit contact
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setActiveId(lead.company.id);
+                    claim(lead.company.id);
+                    applyResult("appointment");
+                  }}
+                >
+                  Appointment
+                </button>
+              </div>
               <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
                 <button
                   type="button"
@@ -2891,7 +3013,7 @@ export default function App() {
           <p>
             Search the book · {bookCount} in book
             {liveCompanies.length ? ` · ${liveCompanies.length} total` : ""}
-            · Add travel from any row
+            · Edit phones · Add travel
           </p>
         </div>
         <div className="search">
@@ -2903,8 +3025,26 @@ export default function App() {
             aria-label="Search book"
           />
         </div>
+        {!liveCompanies.length ? (
+          <div className="demo-banner">
+            No book yet — load territory phones or import Contact Summary.
+            <button className="btn btn-primary btn-block" style={{ marginTop: "0.65rem" }} onClick={() => loadStarterDesk()}>
+              Load starter desk
+            </button>
+            <button
+              className="btn btn-ghost btn-block"
+              style={{ marginTop: "0.45rem" }}
+              onClick={() => {
+                setTab("more");
+                setMorePane("import");
+              }}
+            >
+              Import files
+            </button>
+          </div>
+        ) : null}
         <div className="card">
-          {!filtered.length && <p className="empty">No companies match.</p>}
+          {!filtered.length && liveCompanies.length ? <p className="empty">No companies match.</p> : null}
           {filtered.map((c) => (
             <div key={c.id} className="list-item">
               <div style={{ flex: 1 }}>
@@ -2912,7 +3052,7 @@ export default function App() {
                 <div className="muted">
                   {c.contactName || c.contactTitle || "Contact TBD"}
                   {c.plannerOrder != null ? ` · Planner #${c.plannerOrder}` : ""}
-                  {c.phone ? ` · ${c.phone}` : ""}
+                  {c.phone ? ` · ${c.phone}` : " · No phone"}
                 </div>
                 <BadgeRow c={c} />
               </div>
@@ -2920,11 +3060,11 @@ export default function App() {
                 <button className="btn btn-primary" onClick={() => dial(c)}>
                   Call
                 </button>
-                <button
-                  className="btn btn-accent"
-                  onClick={() => addToTravelList(c.id)}
-                >
+                <button className="btn btn-accent" onClick={() => addToTravelList(c.id)}>
                   {isOnTravelList(c) ? "On travel" : "Add travel"}
+                </button>
+                <button className="btn btn-ghost" onClick={() => openContactEdit(c)}>
+                  Edit
                 </button>
                 <button
                   className="btn btn-ghost"
@@ -2934,7 +3074,7 @@ export default function App() {
                     setTab("more");
                   }}
                 >
-                  Timeline
+                  Open
                 </button>
               </div>
             </div>
@@ -3693,6 +3833,23 @@ export default function App() {
         .map((l) => l.trim())
         .find((l) => l.length > 40 && !l.startsWith("—") && !l.startsWith("Cliffs")) ||
       "Focus on hiring signals and stalled visits. File Scout finds into the book — never invent phones.";
+    const dialBrief = [
+      `CliffsCRM dial brief · ${todayIso()}`,
+      `To dial: ${nextList.length} · Book: ${bookCount} · Phone gaps: ${gaps.length}`,
+      "",
+      ...nextList.slice(0, 12).map((n, i) => {
+        const c = n.company;
+        return `${i + 1}. ${c.name} — ${c.phone || "NO PHONE"} · ${c.contactName || "Rep TBD"} · ${n.why}`;
+      }),
+      "",
+      gaps.length
+        ? `Phone gaps: ${gaps
+            .slice(0, 8)
+            .map((j) => j.company)
+            .join(", ")}`
+        : "Phone gaps: none in Scout queue",
+      "Rule: never invent phones, names, or pay. Goal = appointment.",
+    ].join("\n");
     const localTime = new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     main = (
       <div className={`scout-console${scoutPane === "briefing" ? " scout-console-focus" : ""}`}>
@@ -4315,14 +4472,14 @@ export default function App() {
                   <p className="sbc-metric-sub">In book</p>
                 </div>
                 <div className="sbc-metric">
-                  <p className="sbc-metric-label">Activity feed</p>
-                  <p className="sbc-metric-value mono">{scoutCounts.openRoles}</p>
-                  <p className="sbc-metric-sub">Open roles</p>
+                  <p className="sbc-metric-label">To dial</p>
+                  <p className="sbc-metric-value mono">{nextList.length}</p>
+                  <p className="sbc-metric-sub">Today queue</p>
                 </div>
                 <div className="sbc-metric">
-                  <p className="sbc-metric-label">Opportunities</p>
-                  <p className="sbc-metric-value mono">{scoutCounts.companiesHiring}</p>
-                  <p className="sbc-metric-sub">Hiring now</p>
+                  <p className="sbc-metric-label">Scout roles</p>
+                  <p className="sbc-metric-value mono">{scoutCounts.openRoles}</p>
+                  <p className="sbc-metric-sub">Signals (not invent)</p>
                 </div>
               </div>
             </section>
@@ -4332,12 +4489,13 @@ export default function App() {
               className="sbc-generate"
               onClick={() => {
                 sweepScout();
-                flash("Brief rebuilt from Scout signals");
+                void copyText(dialBrief, "Dial brief");
+                flash("Dial brief copied — open Dialer next");
               }}
             >
               Generate brief →
             </button>
-            <p className="sbc-generate-note">Brief engine · territory-aware · Scout ready</p>
+            <p className="sbc-generate-note">Dial list from Today queue · copy ready · never invent phones</p>
 
             <section className="sbc-section">
               <div className="sbc-section-head">
@@ -4376,23 +4534,39 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  const subject = encodeURIComponent(`Scout Desk · Montgomery · ${todayIso()}`);
-                  const body = encodeURIComponent(briefing);
+                  const subject = encodeURIComponent(`Dial brief · Montgomery · ${todayIso()}`);
+                  const body = encodeURIComponent(dialBrief);
                   window.location.href = `mailto:${scoutPrefs.briefingEmail || OFFICE.agentEmail}?subject=${subject}&body=${body}`;
                 }}
               >
-                Open in Gmail
+                Email dial brief
               </button>
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => void copyText(briefing, "Scout briefing")}
+                onClick={() => void copyText(dialBrief, "Dial brief")}
               >
-                Copy brief
+                Copy dial brief
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => void onSyncDrive()}>
-                Sync Drop
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setTodayMode("desk");
+                  setTab("today");
+                }}
+              >
+                Open Dialer
               </button>
+              {!bookCount ? (
+                <button type="button" className="btn btn-ghost" onClick={() => loadStarterDesk()}>
+                  Load starter desk
+                </button>
+              ) : (
+                <button type="button" className="btn btn-ghost" onClick={() => void onSyncDrive()}>
+                  Sync Drop
+                </button>
+              )}
             </div>
             <div className="sbc-tools">
               {(
@@ -4991,6 +5165,17 @@ export default function App() {
               </button>
               <button
                 type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  setActiveId(dayLead.company.id);
+                  claim(dayLead.company.id);
+                  applyResult("appointment");
+                }}
+              >
+                Appt
+              </button>
+              <button
+                type="button"
                 className="btn btn-ghost"
                 onClick={() => {
                   setActiveId(dayLead.company.id);
@@ -5015,7 +5200,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                className="btn btn-accent"
+                className="btn btn-ghost"
                 onClick={() => {
                   setActiveId(dayLead.company.id);
                   openWrap(dayLead.company, "got_them");
@@ -5230,6 +5415,65 @@ export default function App() {
             setTab("today");
           }}
         />
+      )}
+      {editDraft && (
+        <div className="sheet-overlay" role="dialog" aria-label="Edit contact">
+          <div className="sheet-card wrap-sheet">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <p className="subtle" style={{ margin: 0 }}>
+                  Edit contact
+                </p>
+                <h2 style={{ margin: "0.2rem 0 0" }}>
+                  {liveCompanies.find((c) => c.id === editDraft.id)?.name || "Company"}
+                </h2>
+              </div>
+              <button className="btn btn-ghost" onClick={() => setEditDraft(null)}>
+                Close
+              </button>
+            </div>
+            <div className="wrap-scroll">
+              <p className="subtle">Only enter what they gave you — never invent phones or names.</p>
+              <label className="field-label">Phone</label>
+              <input
+                className="select"
+                value={editDraft.phone}
+                onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })}
+                inputMode="tel"
+                placeholder="(334) …"
+              />
+              <label className="field-label">Company rep</label>
+              <input
+                className="select"
+                value={editDraft.contactName}
+                onChange={(e) => setEditDraft({ ...editDraft, contactName: e.target.value })}
+                placeholder="Name on file"
+              />
+              <label className="field-label">Title</label>
+              <input
+                className="select"
+                value={editDraft.contactTitle}
+                onChange={(e) => setEditDraft({ ...editDraft, contactTitle: e.target.value })}
+                placeholder="Plant mgr / HR / …"
+              />
+              <label className="field-label">Address</label>
+              <input
+                className="select"
+                value={editDraft.address}
+                onChange={(e) => setEditDraft({ ...editDraft, address: e.target.value })}
+                placeholder="Street if known"
+              />
+            </div>
+            <div className="row" style={{ gap: "0.45rem", marginTop: "0.75rem" }}>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => saveContactEdit()}>
+                Save contact
+              </button>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditDraft(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {wrapDraft && (
         <WrapUpSheet

@@ -1,5 +1,8 @@
 /** External research sources + Montgomery territory prospect pack (from Drive notes). */
 
+import type { Company } from "./data";
+import { todayIso } from "./wrapup";
+
 export type ResearchLink = { label: string; url: string };
 
 export type ProspectSeed = {
@@ -292,3 +295,30 @@ export const TERRITORY_PROSPECTS: ProspectSeed[] = [
     source: "Chamber / LinkedIn",
   },
 ];
+
+/**
+ * Cold-open starter desk: territory employers that already have a phone on file.
+ * Never invents numbers — skips seeds without phones. Marks inBook so Accounts/Scout count them.
+ */
+export function buildStarterDesk(): Company[] {
+  const today = todayIso();
+  return TERRITORY_PROSPECTS.filter((p) => !!p.phone?.trim()).map((p, i) => ({
+    id: `territory-${p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 36)}`,
+    name: p.name,
+    city: p.city,
+    address: p.address || "",
+    phone: p.phone!.trim(),
+    contactName: "",
+    contactTitle: "",
+    territory: String((i % 4) + 1),
+    badges: ["prospect" as const],
+    research: [{ source: p.source, date: today, fact: p.fact }],
+    notes: "",
+    blitzState: "open" as const,
+    nextTouch: today,
+    inBook: true,
+    fromContactSummary: false,
+    fromPlanner: false,
+    plannerOrder: i + 1,
+  }));
+}

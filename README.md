@@ -16,7 +16,7 @@ npm run dev
 - CSV import (Contact summary / Planner-style columns)
 - Google / Apple Maps deep links
 - Dialer setting: iPhone / Aircall stub / Google Voice
-- Demo data only until you import — phones never invented
+- Empty book until you **Load starter desk** (territory phones on file) or import Contact Summary — phones never invented
 
 ## Open the desk (company-safe)
 
