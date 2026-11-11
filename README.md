@@ -18,17 +18,23 @@ npm run dev
 - Dialer setting: iPhone / Aircall stub / Google Voice
 - Demo data only until you import — phones never invented
 
+## Open the desk (company-safe)
+
+**Always use GitHub Pages when apps.grok.bot is blocked:**
+
+**https://turkey-webber.github.io/Cliffscrm/**
+
+That URL redeploys automatically on every merge to `main` (workflow: Deploy GitHub Pages). Source repo: https://github.com/turkey-webber/Cliffscrm
+
 ## Hosting
 
 | Host | URL | What runs |
 | --- | --- | --- |
-| **GitHub Pages** (static desk) | https://turkey-webber.github.io/Cliffscrm/ | Vite SPA; book stays in the browser |
-| **Cursor app** | agent publish | Same UI + `/api/drop-sync` and morning-newsletter helpers |
+| **GitHub Pages** (static desk · always latest `main`) | https://turkey-webber.github.io/Cliffscrm/ | Vite SPA; book stays in the browser |
+| **Cursor app** | https://cliffscrm.apps.grok.bot | Same UI + `/api/drop-sync` and morning-newsletter helpers |
 
-GitHub Pages cannot run the Drive sync or Gmail newsletter APIs. Enable **Settings → Pages → GitHub Actions** on the repo; every push to `main` (and this fix branch) builds with `GITHUB_PAGES=true` so asset paths use `/Cliffscrm/`.
+GitHub Pages cannot run the Drive sync or Gmail newsletter APIs. Pages source is **GitHub Actions** on `main` with `GITHUB_PAGES=true` so asset paths use `/Cliffscrm/`.
 
 ## Publish (Cursor)
 
-Commit to `turkey-webber/Cliffscrm` and publish from a Cursor agent attached to that repo when you want the live API host.
-
-Pages source is **GitHub Actions** on `main`.
+Merge to `main` (updates GitHub Pages), then republish the Cursor app when you want the API host updated.
