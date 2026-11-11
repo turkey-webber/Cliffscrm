@@ -1,30 +1,33 @@
 :root {
-  /* Dispatch board — ink + signal lime, not cream/builder green */
-  --ink: #0b1210;
-  --ink-2: #15201c;
-  --paper: #f2f4f1;
-  --paper-2: #e6ebe7;
-  --line: #c9d2cb;
-  --muted: #5a6b62;
-  --subtle: #7a8a81;
-  --signal: #b6f24a;
-  --signal-ink: #13200c;
-  --call: #0f6e56;
+  /* Command Deck — field ops clarity, Express signal lime */
+  --ink: #070c0a;
+  --ink-2: #121a17;
+  --paper: #eef1ef;
+  --paper-2: #e2e8e4;
+  --line: #c2cdc6;
+  --muted: #53635b;
+  --subtle: #718078;
+  --signal: #c6ff4a;
+  --signal-ink: #0e1808;
+  --call: #0b6b53;
   --call-fg: #ecfff7;
-  --warn: #d4a017;
-  --warn-bg: #f5e9c4;
+  --warn: #c99212;
+  --warn-bg: #f3e7c0;
   --danger: #c23b2e;
   --danger-bg: #f8e4e0;
   --locked: #e8d48a;
   --called: #d5ddd6;
+  --elev: #ffffff;
+  --rail: color-mix(in srgb, #0b1210 6%, white);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   font-family: "DM Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    linear-gradient(180deg, #0b1210 0 7.5rem, transparent 7.5rem),
-    radial-gradient(90% 50% at 100% 0%, #1a2e24 0%, transparent 55%),
+    linear-gradient(180deg, #070c0a 0 8rem, transparent 8rem),
+    radial-gradient(80% 42% at 100% 0%, #163528 0%, transparent 58%),
+    radial-gradient(60% 40% at 0% 8%, #0d1f18 0%, transparent 50%),
     var(--paper);
-  line-height: 1.4;
+  line-height: 1.45;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -794,4 +797,173 @@ textarea { min-height: 6.5rem; resize: vertical; }
   .grid-2 { grid-template-columns: 1fr; }
   .goal-grid { grid-template-columns: 1fr; }
   .brand-title { font-size: 1.55rem; }
+}
+
+/* —— Command Deck: filter rail, home widgets, dock —— */
+.filter-rail {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.55rem 0 0.75rem;
+  margin: 0 0 0.35rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.filter-rail::-webkit-scrollbar { display: none; }
+.filter-chip {
+  flex: 0 0 auto;
+  min-height: 2.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  background: var(--elev);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.filter-chip.active {
+  background: var(--ink);
+  color: var(--signal);
+  border-color: var(--ink);
+}
+.filter-chip .count {
+  margin-left: 0.3rem;
+  color: inherit;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.home-hero {
+  margin: 0 0 1rem;
+}
+.home-hero h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  line-height: 1.05;
+}
+.home-hero p {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+}
+.home-stat {
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.7rem 0.5rem;
+  text-align: center;
+}
+.home-stat strong {
+  display: block;
+  font-family: Syne, sans-serif;
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+.home-stat span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.widget-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+.widget-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+  text-align: left;
+  min-height: 6.5rem;
+  padding: 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--signal) 10%, white), white 42%),
+    var(--elev);
+  color: var(--ink);
+  touch-action: manipulation;
+}
+.widget-tile:active {
+  transform: scale(0.985);
+}
+.widget-tile .widget-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 0.65rem;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--signal);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+.widget-tile .widget-label {
+  font-family: Syne, sans-serif;
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.widget-tile .widget-blurb {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+.widget-tile .widget-badge {
+  margin-left: auto;
+  background: var(--ink);
+  color: var(--signal);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+.widget-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+}
+.dock-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.dock-edit-row strong {
+  flex: 1;
+  font-size: 1rem;
+}
+.menu-group-label {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.app-shell.has-filter-rail .main {
+  padding-top: 0.35rem;
+}
+.panel, .card {
+  background: var(--elev);
+  border-color: var(--line);
+}
+.list-item {
+  border-bottom-color: color-mix(in srgb, var(--line) 80%, transparent);
+}
+.tabbar {
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, #0b1210 92%, transparent);
 }

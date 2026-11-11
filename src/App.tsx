@@ -32,6 +32,19 @@ import {
   type MpcCandidate,
   type MpcMatch,
 } from "./mpc";
+import {
+  DEFAULT_DOCK,
+  DOCK_META,
+  HOME_WIDGETS,
+  moveDockItem,
+  normalizeDock,
+  type AppTab,
+  type DockId,
+  type HomeWidgetId,
+  type ListsFilter,
+  type MpcFilter,
+  type TodayFilter,
+} from "./shell";
 import { isResumeFileName, resumeSourceLabel } from "./mpc/detect";
 import {
   clearDirectoryHandle,
@@ -114,7 +127,7 @@ import {
   type WrapUp,
 } from "./wrapup";
 
-type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
+type Tab = AppTab;
 type MorePane =
   | "home"
   | "blitz"
@@ -127,6 +140,8 @@ type MorePane =
   | "gone"
   | "hits"
   | "priority"
+  | "lists"
+  | "dock"
   | "daily"
   | "scout"
   | "research";
@@ -243,6 +258,25 @@ function IconMore() {
     </svg>
   );
 }
+function IconGrid() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
+
+const DOCK_ICONS: Record<DockId, () => ReactNode> = {
+  home: IconGrid,
+  today: IconHome,
+  mpc: IconMpc,
+  accounts: IconBook,
+  q4: IconQ4,
+  more: IconMore,
+};
 
 function BadgeRow({ c }: { c: Company }) {
   return (
@@ -618,8 +652,12 @@ export default function App() {
   const openImprove =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("open") === "newsletter-improve";
-  const [tab, setTab] = useState<Tab>(openImprove ? "more" : "today");
+  const [tab, setTab] = useState<Tab>(openImprove ? "more" : "home");
   const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : "home");
+  const [dockOrder, setDockOrder] = useState<DockId[]>(() => normalizeDock(initial.dockOrder));
+  const [todayFilter, setTodayFilter] = useState<TodayFilter>("all");
+  const [mpcFilter, setMpcFilter] = useState<MpcFilter>("all");
+  const [listsFilter, setListsFilter] = useState<ListsFilter>("hot");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
   const [wrapUps, setWrapUps] = useState<WrapUp[]>(initial.wrapUps);
@@ -762,10 +800,11 @@ export default function App() {
         mpcDropFolderName,
         scoutJobs,
         scoutPrefs,
+        dockOrder,
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
+  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs, dockOrder]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -873,18 +912,78 @@ export default function App() {
     [mpc, selectedMpc],
   );
   /** Live rematch so ranking/why stay current when the book or matcher changes. */
-  const selectedLiveMatches = useMemo(
-    () =>
-      selectedMpcCandidate
-        ? matchMpcToMarket(
-            liveCompanies,
-            selectedMpcCandidate.resumeText,
-            selectedMpcCandidate.trade,
-            selectedMpcCandidate.name,
-          )
-        : [],
-    [liveCompanies, selectedMpcCandidate],
-  );
+  const selectedLiveMatches = useMemo(() => {
+    if (!selectedMpcCandidate) return [];
+    const all = matchMpcToMarket(
+      liveCompanies,
+      selectedMpcCandidate.resumeText,
+      selectedMpcCandidate.trade,
+      selectedMpcCandidate.name,
+    );
+    return all.filter((m) => {
+      if (mpcFilter === "all") return true;
+      if (mpcFilter === "great") return m.fitLabel === "great";
+      if (mpcFilter === "good") return m.fitLabel === "good" || m.fitLabel === "great";
+      if (mpcFilter === "hiring") return !!m.hiringNow;
+      if (mpcFilter === "inbook") return m.inBook;
+      if (mpcFilter === "outside") return !m.inBook;
+      return true;
+    });
+  }, [liveCompanies, selectedMpcCandidate, mpcFilter]);
+
+  function openHomeWidget(id: HomeWidgetId) {
+    if (id === "today") {
+      setTab("today");
+      return;
+    }
+    if (id === "mpc") {
+      setTab("mpc");
+      return;
+    }
+    if (id === "q4") {
+      setTab("q4");
+      return;
+    }
+    if (id === "capture") {
+      setCaptureOpen(true);
+      return;
+    }
+    if (id === "scout") {
+      setTab("more");
+      setMorePane("scout");
+      setScoutPane("brief");
+      return;
+    }
+    if (id === "lists") {
+      setTab("more");
+      setMorePane("lists");
+      setListsFilter("hot");
+      return;
+    }
+    if (id === "brief") {
+      setTab("more");
+      setMorePane("newsletter");
+      return;
+    }
+    if (id === "import") {
+      setTab("more");
+      setMorePane("import");
+      return;
+    }
+    if (id === "settings") {
+      setTab("more");
+      setMorePane("settings");
+    }
+  }
+
+  const widgetBadges: Partial<Record<HomeWidgetId, number>> = {
+    today: toDialCount,
+    mpc: mpc.length,
+    scout: scoutTen.length,
+    q4: q4Pending,
+    lists: hotCount + goneCount,
+    capture: inbox.length,
+  };
   const selectedResumeProfile = useMemo(
     () =>
       selectedMpcCandidate
@@ -1652,7 +1751,49 @@ export default function App() {
 
   let main: ReactNode = null;
 
-  if (tab === "today") {
+  if (tab === "home") {
+    main = (
+      <>
+        <div className="home-hero">
+          <h1>Home</h1>
+          <p>{OFFICE.agentName.split(" ")[0]}’s command deck — open a tool, work the day.</p>
+        </div>
+        <div className="home-stats" aria-label="Day snapshot">
+          <div className="home-stat">
+            <strong className="mono">{toDialCount}</strong>
+            <span>To dial</span>
+          </div>
+          <div className="home-stat">
+            <strong className="mono">
+              {callsDone}/{OFFICE.callGoal}
+            </strong>
+            <span>Calls</span>
+          </div>
+          <div className="home-stat">
+            <strong className="mono">
+              {visitsDone}/{OFFICE.visitGoal}
+            </strong>
+            <span>Visits</span>
+          </div>
+        </div>
+        <div className="widget-grid" aria-label="Most used tools">
+          {HOME_WIDGETS.map((w) => {
+            const badge = widgetBadges[w.id];
+            return (
+              <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
+                <div className="widget-head">
+                  <span className="widget-icon">{w.label.slice(0, 1)}</span>
+                  {badge ? <span className="widget-badge">{badge > 99 ? "99+" : badge}</span> : null}
+                </div>
+                <span className="widget-label">{w.label}</span>
+                <span className="widget-blurb">{w.blurb}</span>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  } else if (tab === "today") {
     const deskItems = nextList;
     const lead = deskItems[0];
     main = (
@@ -1666,6 +1807,54 @@ export default function App() {
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
+        </div>
+        <div className="filter-rail" role="toolbar" aria-label="Today filters">
+          {(
+            [
+              ["all", "All", 0],
+              ["hot", "Hot", hotCount],
+              ["quiet", "Quiet", goneCount],
+              ["leads", "Leads", jobOrderLeads.length],
+              ["plan", "Plan", 0],
+              ["scout", "Scout", scoutTen.length],
+              ["q4", "Q4", q4Pending],
+            ] as const
+          ).map(([id, label, count]) => (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip ${todayFilter === id ? "active" : ""}`}
+              onClick={() => {
+                setTodayFilter(id);
+                if (id === "hot") {
+                  setTab("more");
+                  setMorePane("lists");
+                  setListsFilter("hot");
+                } else if (id === "quiet") {
+                  setTab("more");
+                  setMorePane("lists");
+                  setListsFilter("gone");
+                } else if (id === "leads") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("leads");
+                } else if (id === "plan") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("plan");
+                } else if (id === "scout") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("brief");
+                } else if (id === "q4") {
+                  setTab("q4");
+                }
+              }}
+            >
+              {label}
+              {count ? <span className="count">{Math.min(count, 99)}</span> : null}
+            </button>
+          ))}
         </div>
         <div className="segment" role="tablist" aria-label="Today mode">
           <button
@@ -1693,55 +1882,6 @@ export default function App() {
             {callsDone}/{OFFICE.callGoal} calls · {visitsDone}/{OFFICE.visitGoal} visits
             {q4Pending ? ` · ${q4Pending} Q4` : ""}
           </span>
-        </div>
-        <div className="day-chips" aria-label="Day tools">
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("hot"); }}>
-            Hot<span className="count">{hotCount}</span>
-          </button>
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("gone"); }}>
-            Quiet<span className="count">{goneCount}</span>
-          </button>
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("daily"); }}>
-            Report
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("leads");
-            }}
-          >
-            Leads{jobOrderLeads.length ? <span className="count">{Math.min(jobOrderLeads.length, 99)}</span> : null}
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("plan");
-            }}
-          >
-            Plan
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("brief");
-            }}
-          >
-            Scout{scoutTen.length ? <span className="count">{scoutTen.length}</span> : null}
-          </button>
-          {q4Pending > 0 ? (
-            <button type="button" className="day-chip" onClick={() => setTab("q4")}>
-              Q4<span className="count">{q4Pending}</span>
-            </button>
-          ) : null}
         </div>
         {!deskItems.length && (
           <div className="demo-banner">
@@ -2416,9 +2556,28 @@ export default function App() {
               {selectedLiveMatches.filter((m) => m.inBook).length} in book ·{" "}
               {selectedLiveMatches.filter((m) => !m.inBook).length} outside book
             </p>
-            <p className="subtle">
-              Zip-style fit — resume skills & work history vs each job need. Great / Good / Fair only.
-            </p>
+            <div className="filter-rail" role="toolbar" aria-label="MPC fit filters">
+              {(
+                [
+                  ["all", "All fits"],
+                  ["great", "Great"],
+                  ["good", "Good+"],
+                  ["hiring", "Hiring now"],
+                  ["inbook", "In book"],
+                  ["outside", "Outside"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`filter-chip ${mpcFilter === id ? "active" : ""}`}
+                  onClick={() => setMpcFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="subtle">Zip-style fit — skills & work history vs each job need.</p>
             {selected.note && <p className="subtle">{selected.note}</p>}
             {!selectedLiveMatches.length && (
               <p className="empty">No strong matches — resume skills don’t align with open needs yet.</p>
@@ -3194,6 +3353,13 @@ export default function App() {
           </p>
           <p className="subtle">{routeSummary(routeStops)}</p>
         </div>
+        <div className="card">
+          <h2>Bottom dock</h2>
+          <p className="subtle">Reorder Home · Today · MPC · Accounts · More (or swap in Q4).</p>
+          <button className="btn btn-primary btn-block" onClick={() => setMorePane("dock")}>
+            Rearrange dock
+          </button>
+        </div>
         <div className="panel-box">
           <h2>Hosting</h2>
           <p>
@@ -3889,29 +4055,45 @@ export default function App() {
         )}
       </>
     );
-  } else if (morePane === "hot" || morePane === "gone" || morePane === "hits" || morePane === "priority") {
+  } else if (
+    morePane === "lists" ||
+    morePane === "hot" ||
+    morePane === "gone" ||
+    morePane === "hits" ||
+    morePane === "priority"
+  ) {
+    const listKey: ListsFilter =
+      morePane === "lists"
+        ? listsFilter
+        : morePane === "hot"
+          ? "hot"
+          : morePane === "gone"
+            ? "gone"
+            : morePane === "hits"
+              ? "hits"
+              : "priority";
     const title =
-      morePane === "hot"
+      listKey === "hot"
         ? "Hot Sheet"
-        : morePane === "gone"
+        : listKey === "gone"
           ? "Gone quiet"
-          : morePane === "hits"
+          : listKey === "hits"
             ? "Hit List"
             : "Priority list";
     const blurb =
-      morePane === "hot"
+      listKey === "hot"
         ? "Hiring signals, jackpot, first-year, and missing clients"
-        : morePane === "gone"
+        : listKey === "gone"
           ? "No recent talk or overdue callbacks — win them back"
-          : morePane === "hits"
+          : listKey === "hits"
             ? "Accounts you flagged from Accounts or company cards"
             : "Meetings and callbacks first, then Hot Sheet";
     const rows =
-      morePane === "hot"
+      listKey === "hot"
         ? buildHotSheet(liveCompanies)
-        : morePane === "gone"
+        : listKey === "gone"
           ? buildGoneQuiet(liveCompanies)
-          : morePane === "hits"
+          : listKey === "hits"
             ? buildHitList(liveCompanies)
             : buildPriority(liveCompanies, wrapUps);
     main = (
@@ -3920,15 +4102,37 @@ export default function App() {
           ← More
         </button>
         <div className="section-head">
-          <h1>{title}</h1>
+          <h1>Lists</h1>
           <p>
-            {blurb} · {rows.length}
+            {title} · {blurb} · {rows.length}
           </p>
+        </div>
+        <div className="filter-rail" role="toolbar" aria-label="List type">
+          {(
+            [
+              ["hot", "Hot"],
+              ["gone", "Quiet"],
+              ["hits", "Hits"],
+              ["priority", "Priority"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip ${listKey === id ? "active" : ""}`}
+              onClick={() => {
+                setListsFilter(id);
+                setMorePane("lists");
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {!rows.length ? (
           <div className="card">
             <p className="empty">
-              {morePane === "hits"
+              {listKey === "hits"
                 ? "No Hit List yet — open an account and tap Add to Hit List."
                 : "Nothing here until Contact Summary / Sales Planner / research lands."}
             </p>
@@ -4168,20 +4372,57 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "dock") {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("settings")}>
+          ← Settings
+        </button>
+        <div className="section-head">
+          <h1>Rearrange dock</h1>
+          <p>Choose which shortcuts sit on the bottom bar (max 5).</p>
+        </div>
+        <div className="card">
+          {dockOrder.map((id, i) => (
+            <div key={id} className="dock-edit-row">
+              <strong>{DOCK_META[id].label}</strong>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={i === 0}
+                onClick={() => setDockOrder((d) => moveDockItem(d, i, -1))}
+              >
+                Up
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={i === dockOrder.length - 1}
+                onClick={() => setDockOrder((d) => moveDockItem(d, i, 1))}
+              >
+                Down
+              </button>
+            </div>
+          ))}
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.75rem" }}
+            onClick={() => setDockOrder([...DEFAULT_DOCK])}
+          >
+            Reset to Home · Today · MPC · Accounts · More
+          </button>
+        </div>
+      </>
+    );
   } else {
     main = (
       <>
         <div className="section-head">
           <h1>More</h1>
-          <p>Montgomery desk · {OFFICE.agentName}</p>
+          <p>Secondary tools — Home widgets cover the daily path.</p>
         </div>
         <div className="panel">
-          <button className="menu-link" onClick={() => setMorePane("blitz")}>
-            Team desk / Blitz <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
-            Blitz assign <span>→</span>
-          </button>
+          <p className="menu-group-label">Work</p>
           <button
             className="menu-link"
             onClick={() => {
@@ -4191,20 +4432,14 @@ export default function App() {
           >
             Scout Desk <span>→</span>
           </button>
-          <button className="menu-link" onClick={() => setMorePane("research")}>
-            Research book <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("hot")}>
-            Hot Sheet <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("gone")}>
-            Gone quiet <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("priority")}>
-            Priority list <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("hits")}>
-            Hit List <span>→</span>
+          <button
+            className="menu-link"
+            onClick={() => {
+              setMorePane("lists");
+              setListsFilter("hot");
+            }}
+          >
+            Lists (Hot · Quiet · Hits) <span>→</span>
           </button>
           <button className="menu-link" onClick={() => setMorePane("daily")}>
             Daily Report <span>→</span>
@@ -4212,29 +4447,59 @@ export default function App() {
           <button className="menu-link" onClick={() => setMorePane("newsletter")}>
             Morning brief <span>→</span>
           </button>
+          <p className="menu-group-label">Book</p>
           <button className="menu-link" onClick={() => setMorePane("import")}>
             Import CRM exports <span>→</span>
           </button>
+          <button className="menu-link" onClick={() => setMorePane("research")}>
+            Research book <span>→</span>
+          </button>
+          <p className="menu-group-label">Team</p>
+          <button className="menu-link" onClick={() => setMorePane("blitz")}>
+            Team desk / Blitz <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
+            Blitz assign <span>→</span>
+          </button>
+          <p className="menu-group-label">System</p>
           <button className="menu-link" onClick={() => setMorePane("settings")}>
             Settings <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("dock")}>
+            Rearrange bottom dock <span>→</span>
           </button>
         </div>
       </>
     );
   }
 
+  const brandSub =
+    tab === "home"
+      ? "Command deck"
+      : tab === "mpc"
+        ? selectedMpcCandidate
+          ? `MPC · ${selectedMpcCandidate.name}`
+          : "MPC match"
+        : tab === "accounts"
+          ? "Accounts book"
+          : tab === "q4"
+            ? "Q4 wrap"
+            : tab === "more"
+              ? "Tools & settings"
+              : todayMode === "car" && carLead
+                ? `Car · ${carLead.name}`
+                : dayLead
+                  ? `Next · ${dayLead.company.name}`
+                  : "Today desk";
+
   return (
-    <div className={`app-shell${showDayBar ? " has-daybar" : ""}`}>
+    <div className={`app-shell${showDayBar ? " has-daybar" : ""}${tab === "today" || tab === "mpc" ? " has-filter-rail" : ""}`}>
       <header className="topbar">
         <div className="brand-block">
           <p className="brand-kicker">Express · Montgomery</p>
           <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            {todayMode === "car" && carLead
-              ? `Car · ${carLead.name}`
-              : dayLead
-                ? `Next · ${dayLead.company.name}`
-                : "Field desk"}
+            {brandSub}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
@@ -4363,32 +4628,38 @@ export default function App() {
         +
       </button>
 
-      <nav className="tabbar tabbar-5" aria-label="Primary">
-        {(
-          [
-            ["today", "Today", IconHome, toDialCount || inbox.length],
-            ["mpc", "MPC", IconMpc, mpc.length],
-            ["accounts", "Accounts", IconBook, 0],
-            ["q4", "Q4", IconQ4, q4Pending],
-            ["more", "More", IconMore, 0],
-          ] as const
-        ).map(([id, label, Icon, badge]) => (
-          <button
-            key={id}
-            className={`tab ${tab === id ? "active" : ""}`}
-            onClick={() => {
-              setTab(id);
-              if (id === "more") setMorePane("home");
-            }}
-            aria-label={badge ? `${label}, ${badge}` : label}
-          >
-            <Icon />
-            <span className="tab-label">
-              {label}
-              {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
-            </span>
-          </button>
-        ))}
+      <nav className={`tabbar tabbar-${dockOrder.length}`} aria-label="Primary">
+        {dockOrder.map((id) => {
+          const label = DOCK_META[id].label;
+          const Icon = DOCK_ICONS[id];
+          const badge =
+            id === "today"
+              ? toDialCount || inbox.length
+              : id === "mpc"
+                ? mpc.length
+                : id === "q4"
+                  ? q4Pending
+                  : id === "home"
+                    ? hotCount + q4Pending
+                    : 0;
+          return (
+            <button
+              key={id}
+              className={`tab ${tab === id ? "active" : ""}`}
+              onClick={() => {
+                setTab(id);
+                if (id === "more") setMorePane("home");
+              }}
+              aria-label={badge ? `${label}, ${badge}` : label}
+            >
+              <Icon />
+              <span className="tab-label">
+                {label}
+                {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
+              </span>
+            </button>
+          );
+        })}
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
