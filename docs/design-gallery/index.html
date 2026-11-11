@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CliffsCRM — Futuristic layout gallery (36 comps)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;650;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #050a08;
+      --paper: #f3f6f4;
+      --line: #c5d0c9;
+      --muted: #5a6b62;
+      --signal: #c8ff3d;
+      --signal-ink: #0d1608;
+      --teal: #0f7a62;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(70% 50% at 100% 0%, #163528 0%, transparent 55%),
+        linear-gradient(180deg, #050a08 0 9.5rem, var(--paper) 9.5rem);
+      min-height: 100vh;
+    }
+    header.hero {
+      color: #eef6f0;
+      padding: 1.1rem 1.25rem 0.85rem;
+      max-width: 90rem;
+      margin: 0 auto;
+    }
+    .kicker {
+      font-size: 0.7rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--signal) 80%, white);
+      font-weight: 650;
+    }
+    header.hero h1 {
+      font-family: Syne, sans-serif;
+      font-size: clamp(1.45rem, 3.5vw, 2.1rem);
+      margin: 0.3rem 0 0.35rem;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+    }
+    header.hero p { margin: 0; max-width: 48rem; color: #b7c7bc; line-height: 1.4; font-size: 0.92rem; }
+    .decide-card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      padding: 1rem 1.1rem;
+      margin-bottom: 0.85rem;
+    }
+    .decide-card h3 {
+      font-family: Syne, sans-serif;
+      margin: 0 0 0.55rem;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .decide-card ol, .decide-card ul { margin: 0; padding-left: 1.2rem; color: var(--muted); }
+    .decide-card li { margin: 0.35rem 0; }
+    .decide-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .decide-table th, .decide-table td {
+      text-align: left;
+      padding: 0.55rem 0.4rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .decide-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .decide-table td strong { color: var(--teal); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.65rem 1.25rem 0.85rem;
+      max-width: 90rem;
+      margin: 0 auto;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: color-mix(in srgb, #050a08 90%, transparent);
+      backdrop-filter: blur(12px);
+    }
+    .toolbar button {
+      border: 1px solid #2a3b32;
+      background: #0d1612;
+      color: #dce8e0;
+      border-radius: 999px;
+      padding: 0.48rem 0.85rem;
+      font: inherit;
+      font-weight: 650;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .toolbar button.on {
+      background: var(--signal);
+      color: var(--signal-ink);
+      border-color: var(--signal);
+    }
+    .count {
+      margin-left: auto;
+      color: #9aafa3;
+      font-size: 0.78rem;
+      align-self: center;
+      font-weight: 650;
+    }
+    main { max-width: 90rem; margin: 0 auto; padding: 0.35rem 1.25rem 3rem; }
+    .section { display: none; }
+    .section.on { display: block; }
+    .section-intro {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.9rem;
+    }
+    .section-intro h2 {
+      font-family: Syne, sans-serif;
+      margin: 0 0 0.25rem;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .section-intro p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+      gap: 0.85rem;
+    }
+    .grid.dense {
+      grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+      gap: 0.65rem;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 0.85rem;
+      padding: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      position: relative;
+      cursor: zoom-in;
+    }
+    .card.rec { outline: 2px solid var(--teal); outline-offset: 1px; }
+    .badge {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.55rem;
+      background: var(--ink);
+      color: var(--signal);
+      font-size: 0.55rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.35rem;
+      border-radius: 0.3rem;
+      z-index: 2;
+    }
+    .meta h3 {
+      font-family: Syne, sans-serif;
+      margin: 0;
+      font-size: 0.82rem;
+      letter-spacing: -0.02em;
+      padding-right: 3.2rem;
+      line-height: 1.2;
+    }
+    .meta .thesis {
+      margin: 0.2rem 0 0;
+      color: var(--muted);
+      font-size: 0.68rem;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .shot {
+      border-radius: 0.55rem;
+      overflow: hidden;
+      border: 1px solid #1a2a22;
+      background: #0a1210;
+      aspect-ratio: 9 / 16;
+    }
+    .shot img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+    }
+    .tool-label {
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--teal);
+    }
+    .footer-note {
+      max-width: 90rem;
+      margin: 0 auto;
+      padding: 0 1.25rem 2rem;
+      color: #8fa397;
+      font-size: 0.8rem;
+    }
+    /* Lightbox */
+    .lb {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 10, 8, 0.92);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      gap: 0.75rem;
+    }
+    .lb.on { display: flex; }
+    .lb img {
+      max-height: min(92vh, 920px);
+      max-width: min(92vw, 420px);
+      border-radius: 1rem;
+      border: 1px solid #2a3b32;
+      object-fit: contain;
+      background: #0a1210;
+    }
+    .lb .side {
+      position: absolute;
+      left: 1rem;
+      right: 1rem;
+      bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      pointer-events: none;
+    }
+    .lb .caption {
+      color: #e8f0ea;
+      max-width: 28rem;
+      pointer-events: none;
+    }
+    .lb .caption strong {
+      font-family: Syne, sans-serif;
+      display: block;
+      font-size: 1.05rem;
+    }
+    .lb .caption span { color: #9aafa3; font-size: 0.85rem; }
+    .lb .nav {
+      display: flex;
+      gap: 0.45rem;
+      pointer-events: auto;
+    }
+    .lb .nav button, .lb .close {
+      border: 1px solid #2a3b32;
+      background: #0d1612;
+      color: #e8f0ea;
+      border-radius: 999px;
+      padding: 0.55rem 0.9rem;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .lb .close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="kicker">Express · Montgomery · All 36 layouts + decisions</div>
+    <h1>Futuristic redesign gallery — see everything</h1>
+    <p>
+      Open this published app from the Cursor app pill (not a repo file path).
+      <strong>Decide</strong> has the recommended stack. <strong>All</strong> shows every comp — tap to zoom (← → / Esc).
+      Teal outline = recommended starter.
+    </p>
+  </header>
+
+  <div class="toolbar" id="tabs">
+    <button type="button" data-tab="decide">Decide</button>
+    <button type="button" class="on" data-tab="all">All 36</button>
+    <button type="button" data-tab="home">Home</button>
+    <button type="button" data-tab="today">Today</button>
+    <button type="button" data-tab="mpc">MPC</button>
+    <button type="button" data-tab="accounts">Accounts</button>
+    <button type="button" data-tab="q4">Q4</button>
+    <button type="button" data-tab="scout">Scout</button>
+    <span class="count" id="visible-count">36 layouts</span>
+  </div>
+
+  <main id="main"></main>
+
+  <p class="footer-note">
+    Discussion only. Default stack: Mission Pulse · Dial Cockpit + Car HUD · Fit Leaderboard · Search First · Checklist Focus · Signal Feed.
+  </p>
+
+  <div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="Layout preview">
+    <button type="button" class="close" id="lb-close">Close</button>
+    <img id="lb-img" alt="" />
+    <div class="side">
+      <div class="caption"><strong id="lb-title"></strong><span id="lb-thesis"></span></div>
+      <div class="nav">
+        <button type="button" id="lb-prev">← Prev</button>
+        <button type="button" id="lb-next">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const LAYOUTS = [
+      { tool: "Home", id: "home-01", title: "1 · Mission Pulse", thesis: "Next-action hero + KPIs + widgets. Best urgency/overview balance.", rec: true, file: "home-01-mission-pulse.jpg" },
+      { tool: "Home", id: "home-02", title: "2 · Orbital Command", thesis: "Radial quick-launch around the active company. High novelty.", file: "home-02-orbital-command.jpg" },
+      { tool: "Home", id: "home-03", title: "3 · Day Spine", thesis: "Vertical Now → Midday → Close timeline.", file: "home-03-day-spine.jpg" },
+      { tool: "Home", id: "home-04", title: "4 · Glass Stack", thesis: "Action / Pipeline / Intelligence layers.", file: "home-04-glass-stack.jpg" },
+      { tool: "Home", id: "home-05", title: "5 · Route Ribbon", thesis: "Car-day map ribbon + stops.", file: "home-05-route-ribbon.jpg" },
+      { tool: "Home", id: "home-06", title: "6 · Focus Strip", thesis: "Brutalist Now / Next / Later.", file: "home-06-focus-strip.jpg" },
+
+      { tool: "Today", id: "today-01", title: "1 · Dial Cockpit", thesis: "Huge number, reason/ask carousels, thumbs.", rec: true, file: "today-01-dial-cockpit.jpg" },
+      { tool: "Today", id: "today-02", title: "2 · Split Stage", thesis: "Left reason / right ask panes.", file: "today-02-split-stage.jpg" },
+      { tool: "Today", id: "today-03", title: "3 · Queue Ribbon", thesis: "Horizontal company chips above detail.", file: "today-03-queue-ribbon.jpg" },
+      { tool: "Today", id: "today-04", title: "4 · Car HUD", thesis: "Navigate / Arrived, low text while driving.", rec: true, badge: "Car", file: "today-04-car-hud.jpg" },
+      { tool: "Today", id: "today-05", title: "5 · Card Stack", thesis: "Swipe stack of call cards.", file: "today-05-card-stack.jpg" },
+      { tool: "Today", id: "today-06", title: "6 · Weinberg Theater", thesis: "Opener / reason / ask / objections stage.", file: "today-06-weinberg-theater.jpg" },
+
+      { tool: "MPC", id: "mpc-01", title: "1 · Fit Leaderboard", thesis: "Ranked Great/Good with skill chips.", rec: true, file: "mpc-01-fit-leaderboard.jpg" },
+      { tool: "MPC", id: "mpc-02", title: "2 · Resume | Jobs", thesis: "Split candidate vs matches.", file: "mpc-02-resume-jobs.jpg" },
+      { tool: "MPC", id: "mpc-03", title: "3 · Match Radar", thesis: "Concentric fit rings.", file: "mpc-03-match-radar.jpg" },
+      { tool: "MPC", id: "mpc-04", title: "4 · Dense Filters", thesis: "Filter-first rail + compact rows.", file: "mpc-04-dense-filters.jpg" },
+      { tool: "MPC", id: "mpc-05", title: "5 · Story Cards", thesis: "Large narrative why cards.", file: "mpc-05-story-cards.jpg" },
+      { tool: "MPC", id: "mpc-06", title: "6 · Compare Tray", thesis: "Pin 2–3 companies to compare fit.", file: "mpc-06-compare-tray.jpg" },
+
+      { tool: "Accounts", id: "accounts-01", title: "1 · Search First", thesis: "Giant search + recent + badges.", rec: true, file: "accounts-01-search-first.jpg" },
+      { tool: "Accounts", id: "accounts-02", title: "2 · Territory Lanes", thesis: "Grouped by city for route thinking.", file: "accounts-02-territory-lanes.jpg" },
+      { tool: "Accounts", id: "accounts-03", title: "3 · Badge Rail", thesis: "Jackpot / Missing / First-year filters.", file: "accounts-03-badge-rail.jpg" },
+      { tool: "Accounts", id: "accounts-04", title: "4 · Dense Ledger", thesis: "Spreadsheet energy for power users.", file: "accounts-04-dense-ledger.jpg" },
+      { tool: "Accounts", id: "accounts-05", title: "5 · Spotlight", thesis: "One account hero + dossier peek.", file: "accounts-05-spotlight.jpg" },
+      { tool: "Accounts", id: "accounts-06", title: "6 · Activity Feed", thesis: "Book as timeline of touches.", file: "accounts-06-activity-feed.jpg" },
+
+      { tool: "Q4", id: "q4-01", title: "1 · Checklist Focus", thesis: "One wrap at a time with goals.", rec: true, file: "q4-01-checklist-focus.jpg" },
+      { tool: "Q4", id: "q4-02", title: "2 · Goal Rings", thesis: "Visual progress for calls/visits.", file: "q4-02-goal-rings.jpg" },
+      { tool: "Q4", id: "q4-03", title: "3 · Card Queue", thesis: "Swipe through open wraps.", file: "q4-03-card-queue.jpg" },
+      { tool: "Q4", id: "q4-04", title: "4 · Day Ledger", thesis: "Accounting-style day sheet.", file: "q4-04-day-ledger.jpg" },
+      { tool: "Q4", id: "q4-05", title: "5 · Two-pane Wrap", thesis: "Form left, company context right.", file: "q4-05-two-pane-wrap.jpg" },
+      { tool: "Q4", id: "q4-06", title: "6 · Close Celebration", thesis: "When goals hit — brief + reward.", file: "q4-06-close-celebration.jpg" },
+
+      { tool: "Scout", id: "scout-01", title: "1 · Signal Feed", thesis: "News-style hiring cards → Call/Add.", rec: true, file: "scout-01-signal-feed.jpg" },
+      { tool: "Scout", id: "scout-02", title: "2 · Calendar Spine", thesis: "14-day scout calendar planning.", file: "scout-02-calendar-spine.jpg" },
+      { tool: "Scout", id: "scout-03", title: "3 · Leads Board", thesis: "Kanban New / Working / Won.", file: "scout-03-leads-board.jpg" },
+      { tool: "Scout", id: "scout-04", title: "4 · Today10 Focus", thesis: "Only ten cards. Forces prioritization.", file: "scout-04-today10-focus.jpg" },
+      { tool: "Scout", id: "scout-05", title: "5 · Prospect Radar", thesis: "Outside-book by distance/signal.", file: "scout-05-prospect-radar.jpg" },
+      { tool: "Scout", id: "scout-06", title: "6 · Briefing Console", thesis: "Morning intel + paste import.", file: "scout-06-briefing-console.jpg" },
+    ];
+
+    const INTROS = {
+      decide: ["Pick winners", "Recommended stack + checklist. Then open All 36 to compare comps."],
+      all: ["All 36 layouts", "Every Home, Today, MPC, Accounts, Q4, and Scout concept. Tap to zoom."],
+      home: ["Home — command deck", "Job: open the app and know what to do in under 3 seconds."],
+      today: ["Today — dialer & Office/Car", "Weinberg reasons + appointment asks with ← → and thumbs."],
+      mpc: ["MPC — resume ↔ market", "Zip-style fit first, then company actions."],
+      accounts: ["Accounts — book of record", "Find fast → dossier. Never invent contacts."],
+      q4: ["Q4 — close the day", "Finish wraps, hit goals, no loose ends."],
+      scout: ["Scout — hiring intelligence", "Turn signals into dials/visits without board noise."],
+    };
+
+    const RECOMMENDED = [
+      ["Home", "1 · Mission Pulse", "Next-action hero + KPIs + widgets in under 3 seconds"],
+      ["Today (Office)", "1 · Dial Cockpit", "Number + reason/ask carousels + thumbs"],
+      ["Today (Car)", "4 · Car HUD", "Navigate / Arrived, low text while driving"],
+      ["MPC", "1 · Fit Leaderboard", "Matches shipped Zip-style Great/Good fit"],
+      ["Accounts", "1 · Search First", "Fastest find → dossier"],
+      ["Q4", "1 · Checklist Focus", "One wrap at a time, goals visible"],
+      ["Scout", "1 · Signal Feed", "Signals → Call/Add without board noise"],
+    ];
+
+    const main = document.getElementById("main");
+    const tabs = document.getElementById("tabs");
+    const countEl = document.getElementById("visible-count");
+    let filter = "all";
+    let visible = LAYOUTS.slice();
+    let lbIndex = 0;
+
+    function filtered() {
+      if (filter === "all" || filter === "decide") return LAYOUTS;
+      const map = { home: "Home", today: "Today", mpc: "MPC", accounts: "Accounts", q4: "Q4", scout: "Scout" };
+      return LAYOUTS.filter((l) => l.tool === map[filter]);
+    }
+
+    function cardHtml(l, i) {
+      const badge = l.rec || l.badge
+        ? `<span class="badge">${l.badge || "Recommended"}</span>`
+        : "";
+      return `<article class="card${l.rec ? " rec" : ""}" data-index="${i}" tabindex="0" role="button" aria-label="Open ${l.title}">
+        ${badge}
+        <div class="meta">
+          <div class="tool-label">${l.tool}</div>
+          <h3>${l.title}</h3>
+          <p class="thesis">${l.thesis}</p>
+        </div>
+        <div class="shot"><img src="assets/${l.file}" alt="${l.tool} ${l.title}" loading="lazy" /></div>
+      </article>`;
+    }
+
+    function decideHtml() {
+      const recLayouts = LAYOUTS.filter((l) => l.rec);
+      const rows = RECOMMENDED.map(
+        ([tool, pick, why]) =>
+          `<tr><td>${tool}</td><td><strong>${pick}</strong></td><td>${why}</td></tr>`,
+      ).join("");
+      return `
+        <div class="decide-card">
+          <h3>Recommended stack</h3>
+          <table class="decide-table">
+            <thead><tr><th>Tool</th><th>Pick</th><th>Why</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="decide-card">
+          <h3>When you decide</h3>
+          <ol>
+            <li>Pick Home winner (default Mission Pulse)</li>
+            <li>Pick Today Office + Car winners (Dial Cockpit + Car HUD)</li>
+            <li>Confirm MPC Fit Leaderboard stays</li>
+            <li>Confirm Scout under More vs dock</li>
+            <li>Approve lime-on-ink tokens (or request a palette tweak)</li>
+            <li>Then implement shell + Home only</li>
+          </ol>
+        </div>
+        <div class="decide-card">
+          <h3>Direction</h3>
+          <ul>
+            <li>Ink + signal lime Command Deck — futuristic, still one-handed</li>
+            <li>Appointment goal · never invent phones/names/pay · Q4 sacred</li>
+            <li>Discussion only until you pick — no production redesign ship yet</li>
+          </ul>
+        </div>
+        <div class="section-intro"><h2>Recommended comps</h2><p>Tap any to zoom. Open All 36 for the full set.</p></div>
+        <div class="grid">${recLayouts.map((l, i) => cardHtml(l, LAYOUTS.indexOf(l))).join("")}</div>
+      `;
+    }
+
+    function render() {
+      visible = filter === "decide" ? LAYOUTS.filter((l) => l.rec) : filtered();
+      if (filter === "decide") {
+        // Map card data-index to full LAYOUTS indices via decideHtml
+        main.innerHTML = `<section class="section on">${decideHtml()}</section>`;
+        countEl.textContent = "Decide + 7 recommended";
+        main.querySelectorAll(".card").forEach((el) => {
+          el.addEventListener("click", () => {
+            visible = LAYOUTS;
+            openLb(+el.dataset.index);
+          });
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              visible = LAYOUTS;
+              openLb(+el.dataset.index);
+            }
+          });
+        });
+        return;
+      }
+      const intro = INTROS[filter];
+      const dense = filter === "all" ? " dense" : "";
+      const source = filtered();
+      visible = source;
+      main.innerHTML = `
+        <section class="section on">
+          <div class="section-intro"><h2>${intro[0]}</h2><p>${intro[1]}</p></div>
+          <div class="grid${dense}">${source.map((l, i) => cardHtml(l, i)).join("")}</div>
+        </section>`;
+      countEl.textContent = `${visible.length} layouts`;
+      main.querySelectorAll(".card").forEach((el) => {
+        el.addEventListener("click", () => openLb(+el.dataset.index));
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openLb(+el.dataset.index);
+          }
+        });
+      });
+    }
+
+    const lb = document.getElementById("lb");
+    const lbImg = document.getElementById("lb-img");
+    const lbTitle = document.getElementById("lb-title");
+    const lbThesis = document.getElementById("lb-thesis");
+
+    function openLb(i) {
+      lbIndex = i;
+      const l = visible[i];
+      lbImg.src = `assets/${l.file}`;
+      lbImg.alt = `${l.tool} ${l.title}`;
+      lbTitle.textContent = `${l.tool} · ${l.title}`;
+      lbThesis.textContent = l.thesis;
+      lb.classList.add("on");
+    }
+    function closeLb() { lb.classList.remove("on"); }
+    function step(d) {
+      if (!lb.classList.contains("on")) return;
+      lbIndex = (lbIndex + d + visible.length) % visible.length;
+      openLb(lbIndex);
+    }
+
+    tabs.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-tab]");
+      if (!btn) return;
+      tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+      filter = btn.dataset.tab;
+      closeLb();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    document.getElementById("lb-close").onclick = closeLb;
+    document.getElementById("lb-prev").onclick = () => step(-1);
+    document.getElementById("lb-next").onclick = () => step(1);
+    lb.addEventListener("click", (e) => { if (e.target === lb) closeLb(); });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeLb();
+      if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "ArrowRight") step(1);
+    });
+
+    render();
+  </script>
+</body>
+</html>

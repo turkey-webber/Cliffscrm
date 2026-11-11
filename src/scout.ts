@@ -488,20 +488,21 @@ export function buildScoutCalendar(
 }
 
 /**
- * Add a suggested stop onto the day plan WITHOUT moving Q4 appointments.
+ * Add a company onto today's travel / Car loop WITHOUT moving Q4 appointments.
  * Assigns the next free plannerOrder; does not change existing planner rows' order.
+ * Idempotent when already on the travel list (keeps existing plannerOrder).
  */
 export function addStopToDayPlan(book: Company[], companyId: string, date: string): Company[] {
   const maxOrder = book.reduce((m, c) => Math.max(m, c.plannerOrder ?? 0), 0);
   return book.map((c) => {
     if (c.id !== companyId) return c;
-    // Never strip Q4 lock marks; only fill empty planner slot
-    if (c.fromPlanner && c.plannerOrder != null) return c;
+    // Already on travel list / Q4 planner — leave order alone
+    if (c.plannerOrder != null) return c;
     return {
       ...c,
-      plannerOrder: c.plannerOrder ?? maxOrder + 1,
+      plannerOrder: maxOrder + 1,
       nextTouch: c.nextTouch || date,
-      notes: [c.notes, `${date} · Scout Plan: nearby stop added (Q4 appointments untouched)`]
+      notes: [c.notes, `${date} · Travel list: stop added (Q4 appointments untouched)`]
         .filter(Boolean)
         .join("\n"),
       blitzState: c.blitzState === "dnc" ? "dnc" : "open",

@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_POINTS,
   OFFICE,
+  companyTypeLabel,
   isDemoCompany,
   is2x,
+  isOnTravelList,
   matchCompany,
   resultLabel,
   scoreFor,
+  searchBookCompanies,
   type CallResult,
   type Company,
   type Dialer,
@@ -23,7 +26,29 @@ import { classifyImport, ROLE_LABEL } from "./import/classify";
 import { ingestBrowserFiles, ingestDrivePayload } from "./import/merge";
 import { emptyRecall, loadRecall, pruneRecallToNewest, saveRecall, upsertRecallFiles } from "./import/recall";
 import type { RecallStore } from "./import/types";
-import { buildCandidate, type MpcCandidate, type MpcMatch } from "./mpc";
+import {
+  buildCandidate,
+  buildResumeProfile,
+  fitLabelText,
+  matchMpcToMarket,
+  rematchCandidate,
+  type MpcCandidate,
+  type MpcMatch,
+} from "./mpc";
+import {
+  DEFAULT_DOCK,
+  DOCK_META,
+  HOME_MORE_WIDGETS,
+  HOME_WIDGETS,
+  moveDockItem,
+  normalizeDock,
+  type AppTab,
+  type DockId,
+  type HomeWidgetId,
+  type ListsFilter,
+  type MpcFilter,
+  type TodayFilter,
+} from "./shell";
 import { isResumeFileName, resumeSourceLabel } from "./mpc/detect";
 import {
   clearDirectoryHandle,
@@ -106,7 +131,7 @@ import {
   type WrapUp,
 } from "./wrapup";
 
-type Tab = "today" | "mpc" | "accounts" | "q4" | "more";
+type Tab = AppTab;
 type MorePane =
   | "home"
   | "blitz"
@@ -119,6 +144,9 @@ type MorePane =
   | "gone"
   | "hits"
   | "priority"
+  | "lists"
+  | "dock"
+  | "gallery"
   | "daily"
   | "scout"
   | "research";
@@ -235,6 +263,42 @@ function IconMore() {
     </svg>
   );
 }
+function IconGrid() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
+function IconDial() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.62 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.19a2 2 0 0 1 2.11-.45c.83.29 1.7.5 2.6.62A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+function IconScout() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+const DOCK_ICONS: Record<DockId, () => ReactNode> = {
+  home: IconGrid,
+  dialer: IconDial,
+  today: IconHome,
+  scout: IconScout,
+  mpc: IconMpc,
+  accounts: IconBook,
+  q4: IconQ4,
+  more: IconMore,
+};
 
 function BadgeRow({ c }: { c: Company }) {
   return (
@@ -610,8 +674,12 @@ export default function App() {
   const openImprove =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("open") === "newsletter-improve";
-  const [tab, setTab] = useState<Tab>(openImprove ? "more" : "today");
+  const [tab, setTab] = useState<Tab>(openImprove ? "more" : "home");
   const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : "home");
+  const [dockOrder, setDockOrder] = useState<DockId[]>(() => normalizeDock(initial.dockOrder));
+  const [todayFilter, setTodayFilter] = useState<TodayFilter>("all");
+  const [mpcFilter, setMpcFilter] = useState<MpcFilter>("all");
+  const [listsFilter, setListsFilter] = useState<ListsFilter>("hot");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
   const [companies, setCompanies] = useState<Company[]>(initial.companies);
   const [wrapUps, setWrapUps] = useState<WrapUp[]>(initial.wrapUps);
@@ -633,10 +701,11 @@ export default function App() {
   const [suggestBusy, setSuggestBusy] = useState(false);
   const [scoutJobs, setScoutJobs] = useState<ScoutJob[]>(initial.scoutJobs || []);
   const [scoutPrefs, setScoutPrefs] = useState<ScoutPrefs>(initial.scoutPrefs || DEFAULT_SCOUT_PREFS);
-  const [scoutPane, setScoutPane] = useState<ScoutPane>("brief");
+  const [scoutPane, setScoutPane] = useState<ScoutPane>("briefing");
   const [scoutPaste, setScoutPaste] = useState("");
   const [scoutQuery, setScoutQuery] = useState("");
   const [scoutCalDay, setScoutCalDay] = useState(todayIso());
+  const [travelQuery, setTravelQuery] = useState("");
   const [dossierById, setDossierById] = useState<Record<string, CompanyDossier>>({});
   const [dossierBusy, setDossierBusy] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -754,10 +823,11 @@ export default function App() {
         mpcDropFolderName,
         scoutJobs,
         scoutPrefs,
+        dockOrder,
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs]);
+  }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs, dockOrder]);
 
   const active = liveCompanies.find((c) => c.id === activeId) ?? liveCompanies[0];
   const nextList = useMemo(() => buildNextList(liveCompanies, wrapUps), [liveCompanies, wrapUps]);
@@ -859,6 +929,112 @@ export default function App() {
     [liveCompanies, mpc, newsletterPrefs],
   );
   const morningHtml = useMemo(() => newsletterHtml(morningBrief), [morningBrief]);
+
+  const selectedMpcCandidate = useMemo(
+    () => mpc.find((c) => c.id === selectedMpc) || mpc[0],
+    [mpc, selectedMpc],
+  );
+  /** Live rematch so ranking/why stay current when the book or matcher changes. */
+  const selectedLiveMatches = useMemo(() => {
+    if (!selectedMpcCandidate) return [];
+    const all = matchMpcToMarket(
+      liveCompanies,
+      selectedMpcCandidate.resumeText,
+      selectedMpcCandidate.trade,
+      selectedMpcCandidate.name,
+    );
+    return all.filter((m) => {
+      if (mpcFilter === "all") return true;
+      if (mpcFilter === "great") return m.fitLabel === "great";
+      if (mpcFilter === "good") return m.fitLabel === "good" || m.fitLabel === "great";
+      if (mpcFilter === "hiring") return !!m.hiringNow;
+      if (mpcFilter === "inbook") return m.inBook;
+      if (mpcFilter === "outside") return !m.inBook;
+      return true;
+    });
+  }, [liveCompanies, selectedMpcCandidate, mpcFilter]);
+
+  function openHomeWidget(id: HomeWidgetId) {
+    if (id === "today") {
+      setTab("today");
+      return;
+    }
+    if (id === "mpc") {
+      setTab("mpc");
+      return;
+    }
+    if (id === "q4") {
+      setTab("q4");
+      return;
+    }
+    if (id === "capture") {
+      setCaptureOpen(true);
+      return;
+    }
+    if (id === "scout") {
+      setTab("more");
+      setMorePane("scout");
+      setScoutPane("briefing");
+      return;
+    }
+    if (id === "lists") {
+      setTab("more");
+      setMorePane("lists");
+      setListsFilter("hot");
+      return;
+    }
+    if (id === "brief") {
+      setTab("more");
+      setMorePane("newsletter");
+      return;
+    }
+    if (id === "import") {
+      setTab("more");
+      setMorePane("import");
+      return;
+    }
+    if (id === "settings") {
+      setTab("more");
+      setMorePane("settings");
+    }
+  }
+
+  const widgetBadges: Partial<Record<HomeWidgetId, number>> = {
+    today: toDialCount,
+    mpc: mpc.length,
+    scout: scoutTen.length,
+    q4: q4Pending,
+    lists: hotCount + goneCount,
+    capture: inbox.length,
+  };
+  const selectedResumeProfile = useMemo(
+    () =>
+      selectedMpcCandidate
+        ? selectedMpcCandidate.profile ||
+          buildResumeProfile({
+            resumeText: selectedMpcCandidate.resumeText,
+            name: selectedMpcCandidate.name,
+            trade: selectedMpcCandidate.trade,
+          })
+        : null,
+    [selectedMpcCandidate],
+  );
+
+  useEffect(() => {
+    if (!selectedMpcCandidate) return;
+    const next = rematchCandidate(selectedMpcCandidate, liveCompanies);
+    const same =
+      next.matches.length === selectedMpcCandidate.matches.length &&
+      next.trade === selectedMpcCandidate.trade &&
+      next.matches.every(
+        (m, i) =>
+          m.companyName === selectedMpcCandidate.matches[i]?.companyName &&
+          m.matchPct === selectedMpcCandidate.matches[i]?.matchPct &&
+          m.why === selectedMpcCandidate.matches[i]?.why,
+      );
+    if (same) return;
+    setMpc((list) => list.map((c) => (c.id === next.id ? next : c)));
+  }, [liveCompanies, selectedMpcCandidate]);
 
   async function submitNewsletterSuggestion() {
     const suggestion = newsletterSuggestion.trim();
@@ -1192,6 +1368,32 @@ export default function App() {
     setCompanies((prev) => addStopToDayPlan(prev, companyId, date));
     flash("Nearby stop added — Q4 appointments not moved");
   }
+
+  function addToTravelList(companyId: string) {
+    const c = liveCompanies.find((row) => row.id === companyId);
+    if (!c) {
+      flash("Company not in book");
+      return;
+    }
+    if (isOnTravelList(c)) {
+      flash(`${c.name} already on travel list`);
+      setTravelQuery("");
+      setTodayMode("car");
+      setTab("today");
+      return;
+    }
+    const date = todayIso();
+    setCompanies((prev) => addStopToDayPlan(prev, companyId, date));
+    setTravelQuery("");
+    setTodayMode("car");
+    setTab("today");
+    flash(`${c.name} · ${companyTypeLabel(c)} added to travel list`);
+  }
+
+  const travelMatches = useMemo(
+    () => searchBookCompanies(liveCompanies, travelQuery, 8),
+    [liveCompanies, travelQuery],
+  );
 
   async function buildDossierFor(c: Company, enrich: boolean) {
     setDossierBusy(c.id);
@@ -1598,7 +1800,151 @@ export default function App() {
 
   let main: ReactNode = null;
 
-  if (tab === "today") {
+  if (tab === "home") {
+    const nextCompany = dayLead?.company ?? null;
+    main = (
+      <>
+        <div className="home-hero">
+          <h1>Dashboard</h1>
+          <p>
+            {OFFICE.agentName.split(" ")[0]} · Express Montgomery — one next step, then Dialer, Today, or Scout.
+          </p>
+        </div>
+        {nextCompany ? (
+          <div className="home-next">
+            <p className="home-next-label">Next up · {todayMode === "car" ? "Car" : "Office"}</p>
+            <h2>{nextCompany.name}</h2>
+            <p>
+              {dayLead?.why || companyTypeLabel(nextCompany)}
+              {nextCompany.contactName ? ` · ${nextCompany.contactName}` : ""}
+              {nextCompany.phone ? ` · ${nextCompany.phone}` : " · No phone on file"}
+            </p>
+            <div className="home-next-actions">
+              {nextCompany.phone ? (
+                <button
+                  type="button"
+                  className="btn btn-accent"
+                  onClick={() => {
+                    setActiveId(nextCompany.id);
+                    setTodayMode("desk");
+                    setTab("today");
+                    dial(nextCompany);
+                  }}
+                >
+                  Call
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                onClick={() => {
+                  setActiveId(nextCompany.id);
+                  setTab("today");
+                }}
+              >
+                Open Today
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                onClick={() => addToTravelList(nextCompany.id)}
+              >
+                {isOnTravelList(nextCompany) ? "On travel" : "Add to travel"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="demo-banner" style={{ marginBottom: "0.85rem" }}>
+            {liveCompanies.length
+              ? "Nothing queued — sync Drop, open Lists, or add a travel stop."
+              : "Sync Contact Summary + Sales Planner from Drop to start the day."}
+            <button
+              className="btn btn-accent btn-block"
+              style={{ marginTop: "0.65rem" }}
+              disabled={!!importBusy}
+              onClick={() => (liveCompanies.length ? setTab("today") : void onSyncDrive())}
+            >
+              {liveCompanies.length ? "Open Today" : importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+            </button>
+          </div>
+        )}
+        <div className="home-focus" aria-label="Now next later">
+          <button
+            type="button"
+            className="on"
+            onClick={() => {
+              setTodayMode("desk");
+              setTab("today");
+            }}
+          >
+            Now · Dialer
+          </button>
+          <button
+            type="button"
+            onClick={() => (q4Pending ? setTab("q4") : setTab("today"))}
+          >
+            Next · {q4Pending ? `Q4 (${q4Pending})` : "Car / travel"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTab("more");
+              setMorePane("scout");
+              setScoutPane("briefing");
+            }}
+          >
+            Later · Scout
+          </button>
+        </div>
+        <div className="home-stats" aria-label="Day snapshot">
+          <div className="home-stat">
+            <strong className="mono">{toDialCount}</strong>
+            <span>To dial</span>
+          </div>
+          <div className="home-stat">
+            <strong className="mono">
+              {callsDone}/{OFFICE.callGoal}
+            </strong>
+            <span>Calls</span>
+          </div>
+          <div className="home-stat">
+            <strong className="mono">
+              {visitsDone}/{OFFICE.visitGoal}
+            </strong>
+            <span>Visits</span>
+          </div>
+        </div>
+        <div className="widget-grid" aria-label="Primary tools">
+          {HOME_WIDGETS.map((w) => {
+            const badge = widgetBadges[w.id];
+            return (
+              <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
+                <div className="widget-head">
+                  <span className="widget-icon">{w.label.slice(0, 1)}</span>
+                  {badge ? <span className="widget-badge">{badge > 99 ? "99+" : badge}</span> : null}
+                </div>
+                <span className="widget-label">{w.label}</span>
+                <span className="widget-blurb">{w.blurb}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="widget-grid" style={{ marginTop: "0.65rem", opacity: 0.92 }} aria-label="More tools">
+          {HOME_MORE_WIDGETS.map((w) => (
+            <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
+              <div className="widget-head">
+                <span className="widget-icon">{w.label.slice(0, 1)}</span>
+              </div>
+              <span className="widget-label">{w.label}</span>
+              <span className="widget-blurb">{w.blurb}</span>
+            </button>
+          ))}
+        </div>
+      </>
+    );
+  } else if (tab === "today") {
     const deskItems = nextList;
     const lead = deskItems[0];
     main = (
@@ -1607,11 +1953,59 @@ export default function App() {
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Office — call the Next card; sticky bar does the rest"
-              : "Car — navigate the loop; Arrived logs the visit"}
+              ? "Dialer (Office) — call the next company; save wraps as you go"
+              : "Today (Car) — navigate stops; Arrived logs the visit"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
+        </div>
+        <div className="filter-rail" role="toolbar" aria-label="Today filters">
+          {(
+            [
+              ["all", "All", 0],
+              ["hot", "Hot", hotCount],
+              ["quiet", "Quiet", goneCount],
+              ["leads", "Leads", jobOrderLeads.length],
+              ["plan", "Plan", 0],
+              ["scout", "Scout", scoutTen.length],
+              ["q4", "Q4", q4Pending],
+            ] as const
+          ).map(([id, label, count]) => (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip ${todayFilter === id ? "active" : ""}`}
+              onClick={() => {
+                setTodayFilter(id);
+                if (id === "hot") {
+                  setTab("more");
+                  setMorePane("lists");
+                  setListsFilter("hot");
+                } else if (id === "quiet") {
+                  setTab("more");
+                  setMorePane("lists");
+                  setListsFilter("gone");
+                } else if (id === "leads") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("leads");
+                } else if (id === "plan") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("plan");
+                } else if (id === "scout") {
+                  setTab("more");
+                  setMorePane("scout");
+                  setScoutPane("briefing");
+                } else if (id === "q4") {
+                  setTab("q4");
+                }
+              }}
+            >
+              {label}
+              {count ? <span className="count">{Math.min(count, 99)}</span> : null}
+            </button>
+          ))}
         </div>
         <div className="segment" role="tablist" aria-label="Today mode">
           <button
@@ -1631,6 +2025,57 @@ export default function App() {
             Car
           </button>
         </div>
+        <div className="panel travel-add">
+          <details open={todayMode === "car" || !!travelQuery.trim()}>
+            <summary>Add stop to travel list</summary>
+            <p className="subtle" style={{ marginTop: "0.45rem" }}>
+              Type a book company — we show its type — then add it to the Car loop.
+            </p>
+            <div className="search" style={{ marginBottom: travelMatches.length ? "0.35rem" : "0" }}>
+              <span className="subtle">⌕</span>
+              <input
+                placeholder="Type company name…"
+                value={travelQuery}
+                onChange={(e) => setTravelQuery(e.target.value)}
+                aria-label="Find company for travel list"
+                autoComplete="off"
+              />
+            </div>
+            {travelQuery.trim() && !travelMatches.length && (
+              <p className="empty" style={{ margin: "0.35rem 0 0" }}>
+                No book match. Search Accounts or Sync Drop first — never invent a company.
+              </p>
+            )}
+            {!!travelMatches.length && (
+              <div className="travel-match-list" role="listbox" aria-label="Recognized companies">
+                {travelMatches.map((c) => {
+                  const onList = isOnTravelList(c);
+                  return (
+                    <div key={c.id} className="travel-match" role="option" aria-selected={false}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong>{c.name}</strong>
+                        <div className="muted">
+                          <span className="chip" style={{ marginRight: "0.35rem" }}>
+                            {companyTypeLabel(c)}
+                          </span>
+                          {[c.city, c.contactName].filter(Boolean).join(" · ") || "In book"}
+                          {onList ? " · already on list" : ""}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={onList ? "btn btn-ghost" : "btn btn-primary"}
+                        onClick={() => addToTravelList(c.id)}
+                      >
+                        {onList ? "Open Car" : "Add stop"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </details>
+        </div>
         <div className="day-progress" aria-label="Daily progress">
           <span>
             <strong className="mono">{toDialCount}</strong> to dial
@@ -1639,55 +2084,6 @@ export default function App() {
             {callsDone}/{OFFICE.callGoal} calls · {visitsDone}/{OFFICE.visitGoal} visits
             {q4Pending ? ` · ${q4Pending} Q4` : ""}
           </span>
-        </div>
-        <div className="day-chips" aria-label="Day tools">
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("hot"); }}>
-            Hot<span className="count">{hotCount}</span>
-          </button>
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("gone"); }}>
-            Quiet<span className="count">{goneCount}</span>
-          </button>
-          <button type="button" className="day-chip" onClick={() => { setTab("more"); setMorePane("daily"); }}>
-            Report
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("leads");
-            }}
-          >
-            Leads{jobOrderLeads.length ? <span className="count">{Math.min(jobOrderLeads.length, 99)}</span> : null}
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("plan");
-            }}
-          >
-            Plan
-          </button>
-          <button
-            type="button"
-            className="day-chip"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("brief");
-            }}
-          >
-            Scout{scoutTen.length ? <span className="count">{scoutTen.length}</span> : null}
-          </button>
-          {q4Pending > 0 ? (
-            <button type="button" className="day-chip" onClick={() => setTab("q4")}>
-              Q4<span className="count">{q4Pending}</span>
-            </button>
-          ) : null}
         </div>
         {!deskItems.length && (
           <div className="demo-banner">
@@ -1727,7 +2123,7 @@ export default function App() {
         {todayMode === "desk" && lead && (
           <div className="dial-cockpit">
             <div className="hero-call">
-              <p className="eyebrow">Auto dial · {lead.motion}</p>
+              <p className="eyebrow">Next call · {lead.motion}</p>
               <h2>{lead.company.name}</h2>
               <p>
                 {lead.why}
@@ -1941,8 +2337,8 @@ export default function App() {
               <p className="subtle">From {OFFICE.address}</p>
               {!routeStops.length && (
                 <p className="empty">
-                  No drive stops yet. Sync Sales Planner visits or add addresses on Today accounts — same
-                  ranked list as Office.
+                  No drive stops yet. Type a company above in <strong>Add to travel list</strong>, or sync
+                  Sales Planner visits — same ranked list as Office.
                 </p>
               )}
             </div>
@@ -2188,12 +2584,12 @@ export default function App() {
       </>
     );
   } else if (tab === "mpc") {
-    const selected = mpc.find((c) => c.id === selectedMpc) || mpc[0];
+    const selected = selectedMpcCandidate;
     main = (
       <>
         <div className="section-head">
           <h1>MPC</h1>
-          <p>Resume in → pair with companies in and not in your book → research links out.</p>
+          <p>Fit leaderboard — resume skills vs jobs, Great/Good/Fair, then call or add.</p>
         </div>
         <div className="panel">
           <h2>Receive candidate</h2>
@@ -2339,25 +2735,85 @@ export default function App() {
             <h2>
               {selected.name} · {selected.trade}
             </h2>
+            {selectedResumeProfile && (
+              <div className="mpc-profile">
+                <div className="mpc-profile-line">{selectedResumeProfile.summaryLine}</div>
+                {!!selectedResumeProfile.skills.length && (
+                  <div className="row wrap" style={{ marginTop: "0.4rem" }}>
+                    {selectedResumeProfile.skills.slice(0, 10).map((s) => (
+                      <span key={s} className="chip chip-skill">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {!!selectedResumeProfile.titles.length && (
+                  <p className="subtle" style={{ marginTop: "0.35rem" }}>
+                    Work history signals: {selectedResumeProfile.titles.slice(0, 4).join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
             <p>
-              {selected.matches.filter((m) => m.inBook).length} in book ·{" "}
-              {selected.matches.filter((m) => !m.inBook).length} outside book
+              {selectedLiveMatches.filter((m) => m.inBook).length} in book ·{" "}
+              {selectedLiveMatches.filter((m) => !m.inBook).length} outside book
             </p>
+            <div className="filter-rail" role="toolbar" aria-label="MPC fit filters">
+              {(
+                [
+                  ["all", "All fits"],
+                  ["great", "Great"],
+                  ["good", "Good+"],
+                  ["hiring", "Hiring now"],
+                  ["inbook", "In book"],
+                  ["outside", "Outside"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`filter-chip ${mpcFilter === id ? "active" : ""}`}
+                  onClick={() => setMpcFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="subtle">Zip-style fit — skills & work history vs each job need.</p>
             {selected.note && <p className="subtle">{selected.note}</p>}
-            {!selected.matches.length && <p className="empty">No strong matches — try a clearer trade or resume.</p>}
-            {selected.matches.map((m) => (
-              <div key={`${m.companyName}-${m.inBook}`} className="list-item" style={{ alignItems: "stretch" }}>
-                <div style={{ flex: 1 }}>
-                  <strong>
-                    {m.companyName}{" "}
+            {!selectedLiveMatches.length && (
+              <p className="empty">No strong matches — resume skills don’t align with open needs yet.</p>
+            )}
+            {selectedLiveMatches.map((m) => (
+              <div key={`${m.companyName}-${m.inBook}`} className="mpc-match list-item">
+                <div className="mpc-match-main">
+                  <div className="mpc-match-top">
+                    <span className={`mpc-fit mpc-fit-${m.fitLabel || "fair"}`}>
+                      {fitLabelText(m.fitLabel || "fair")} · {m.matchPct ?? m.score}%
+                    </span>
+                    {m.hiringNow && <span className="chip chip-jackpot">Hiring now</span>}
                     <span className={`chip ${m.inBook ? "chip-first" : "chip-missing"}`}>
                       {m.inBook ? "In book" : "Not in book"}
                     </span>
-                  </strong>
-                  <div className="muted">
-                    score {m.score} · {m.why}
                   </div>
-                  <div className="muted">
+                  <strong className="mpc-job-title">{m.jobTitle || selected.trade}</strong>
+                  <div className="mpc-company">{m.companyName}</div>
+                  <div className="muted">{m.why}</div>
+                  {!!(m.matchedSkills?.length || m.missingSkills?.length) && (
+                    <div className="row wrap mpc-skills" style={{ marginTop: "0.4rem" }}>
+                      {(m.matchedSkills || []).slice(0, 6).map((s) => (
+                        <span key={`h-${s}`} className="chip chip-skill-hit">
+                          {s}
+                        </span>
+                      ))}
+                      {(m.missingSkills || []).slice(0, 3).map((s) => (
+                        <span key={`m-${s}`} className="chip chip-skill-miss">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="muted" style={{ marginTop: "0.35rem" }}>
                     {[m.city, m.phone].filter(Boolean).join(" · ") || "Contact research via links"}
                   </div>
                   <div className="row wrap" style={{ marginTop: "0.45rem" }}>
@@ -2376,7 +2832,7 @@ export default function App() {
                     className="btn btn-ghost"
                     onClick={() =>
                       void copyText(
-                        `MPC: ${selected.name} (${selected.trade})\nCompany: ${m.companyName}\n${m.why}\n${m.researchLinks.map((l) => `${l.label}: ${l.url}`).join("\n")}`,
+                        `MPC: ${selected.name} (${selected.trade})\n${fitLabelText(m.fitLabel || "fair")} ${m.matchPct}%\n${m.jobTitle} @ ${m.companyName}\n${m.why}\nMatched: ${(m.matchedSkills || []).join(", ")}\n${m.researchLinks.map((l) => `${l.label}: ${l.url}`).join("\n")}`,
                         "MPC match",
                       )
                     }
@@ -2402,7 +2858,9 @@ export default function App() {
                   <strong>
                     {c.name} · {c.trade}
                   </strong>
-                  <div className="muted">{c.matches.length} matches</div>
+                  <div className="muted">
+                    {matchMpcToMarket(liveCompanies, c.resumeText, c.trade, c.name).length} matches
+                  </div>
                 </div>
               </button>
             ))}
@@ -2431,8 +2889,9 @@ export default function App() {
         <div className="section-head">
           <h1>Accounts</h1>
           <p>
-            Contact Summary book · {bookCount} in book
+            Search the book · {bookCount} in book
             {liveCompanies.length ? ` · ${liveCompanies.length} total` : ""}
+            · Add travel from any row
           </p>
         </div>
         <div className="search">
@@ -2462,6 +2921,12 @@ export default function App() {
                   Call
                 </button>
                 <button
+                  className="btn btn-accent"
+                  onClick={() => addToTravelList(c.id)}
+                >
+                  {isOnTravelList(c) ? "On travel" : "Add travel"}
+                </button>
+                <button
                   className="btn btn-ghost"
                   onClick={() => {
                     setActiveId(c.id);
@@ -2481,9 +2946,9 @@ export default function App() {
     main = (
       <>
         <div className="section-head">
-          <h1>Q4 sheet</h1>
+          <h1>Q4</h1>
           <p>
-            {doneCount} of {dayWraps.length} entered in Q4
+            Close the day · {doneCount} of {dayWraps.length} wraps entered
           </p>
         </div>
         <div className="card">
@@ -3097,6 +3562,13 @@ export default function App() {
           </p>
           <p className="subtle">{routeSummary(routeStops)}</p>
         </div>
+        <div className="card">
+          <h2>Bottom dock</h2>
+          <p className="subtle">Reorder Home · Today · MPC · Accounts · More (or swap in Q4).</p>
+          <button className="btn btn-primary btn-block" onClick={() => setMorePane("dock")}>
+            Rearrange dock
+          </button>
+        </div>
         <div className="panel-box">
           <h2>Hosting</h2>
           <p>
@@ -3204,29 +3676,42 @@ export default function App() {
     const war = competitorBoard(allScoutJobs);
     const gaps = phoneGapQueue(allScoutJobs);
     const hyundai = hyundaiPark(allScoutJobs);
+    const pasteJobs = allScoutJobs.filter((j) => j.source === "paste").slice(0, 8);
+    const consoleJobs =
+      pasteJobs.length > 0
+        ? pasteJobs
+        : scoutTen.slice(0, 5).map((j) => ({ ...j, source: j.source || ("book" as const) }));
+    const lastSyncLabel = scoutPrefs.lastSweepAt
+      ? new Date(scoutPrefs.lastSweepAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "Not yet";
+    const syncAgo = scoutPrefs.lastSweepAt
+      ? Math.max(0, Math.round((now - new Date(scoutPrefs.lastSweepAt).getTime()) / 60000))
+      : null;
+    const briefFocus =
+      briefing
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 40 && !l.startsWith("—") && !l.startsWith("Cliffs")) ||
+      "Focus on hiring signals and stalled visits. File Scout finds into the book — never invent phones.";
+    const localTime = new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     main = (
-      <>
-        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
-          ← More
-        </button>
-        <div className="section-head">
-          <h1>Scout Desk</h1>
-          <p>
-            Montgomery territory · private employers only · Hyundai parked · Q4 appointments never
-            overridden
-          </p>
-        </div>
+      <div className={`scout-console${scoutPane === "briefing" ? " scout-console-focus" : ""}`}>
+        {scoutPane !== "briefing" ? (
+          <button className="btn btn-ghost scout-back" onClick={() => setScoutPane("briefing")}>
+            ← Briefing console
+          </button>
+        ) : null}
         <div className="segment scout-segment">
           {(
             [
-              ["brief", "Brief"],
+              ["briefing", "Console"],
+              ["brief", "Market"],
               ["leads", "Leads"],
               ["today10", "Today 10"],
               ["jobs", "Jobs"],
               ["prospect", "Prospect"],
               ["plan", "Plan"],
               ["contacts", "Contacts"],
-              ["briefing", "Briefing"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -3753,26 +4238,143 @@ export default function App() {
         )}
 
         {scoutPane === "briefing" && (
-          <div className="panel">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Morning briefing</h2>
-              <button className="btn btn-ghost" onClick={() => sweepScout()}>
-                Rebuild
-              </button>
+          <div className="scout-briefing-console">
+            <header className="sbc-top">
+              <div className="sbc-brand">
+                <div className="sbc-mark" aria-hidden="true" />
+                <div>
+                  <p className="sbc-title">Cliffs CRM</p>
+                  <p className="sbc-sub">Scout briefing console</p>
+                </div>
+              </div>
+            </header>
+
+            <div className="sbc-operator">
+              <div className="sbc-avatar" aria-hidden="true" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p className="sbc-kicker">Field desk</p>
+                <p className="sbc-operator-name">Morning intel · {OFFICE.agentName.split(" ")[0]}</p>
+              </div>
+              <div className="sbc-local">
+                <span className="sbc-sun" aria-hidden="true" />
+                <span>{localTime} local</span>
+              </div>
             </div>
-            <p className="subtle">
-              Built after each sweep. Open in Gmail or copy. Default morning rebuild when you open
-              Scout.
-            </p>
-            <label className="subtle">Recipient (saved on this device)</label>
-            <input
-              className="field-input"
-              value={scoutPrefs.briefingEmail}
-              onChange={(e) => setScoutPrefs((p) => ({ ...p, briefingEmail: e.target.value }))}
-            />
-            <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.55rem" }}>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Briefing paste jobs</h2>
+                <button
+                  type="button"
+                  className="sbc-link"
+                  onClick={() => setScoutPane("jobs")}
+                  aria-label="Paste jobs help"
+                >
+                  Paste
+                </button>
+              </div>
+              <div className="sbc-card">
+                {!consoleJobs.length && (
+                  <p className="sbc-empty">
+                    Paste hiring lines on Jobs, or Sweep Market — Q4 appointments stay locked.
+                  </p>
+                )}
+                {consoleJobs.map((j) => {
+                  const ready = !!j.company && !!j.title;
+                  return (
+                    <div key={j.id} className="sbc-job-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p className="sbc-job-meta">Pasted job</p>
+                        <p className="sbc-job-title">
+                          {j.company}
+                          {j.title ? ` — ${j.title}` : ""}
+                        </p>
+                      </div>
+                      <div className={`sbc-status ${ready ? "ready" : "pending"}`}>
+                        <span className="sbc-dot" />
+                        {ready ? "Ready" : "Pending"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Sync row</h2>
+                <p className="sbc-sync-meta">
+                  Last sync: {lastSyncLabel}
+                  {syncAgo != null ? ` (${syncAgo}m ago)` : ""}
+                </p>
+              </div>
+              <div className="sbc-sync-grid">
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">CRM records</p>
+                  <p className="sbc-metric-value mono">{bookCount.toLocaleString()}</p>
+                  <p className="sbc-metric-sub">In book</p>
+                </div>
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">Activity feed</p>
+                  <p className="sbc-metric-value mono">{scoutCounts.openRoles}</p>
+                  <p className="sbc-metric-sub">Open roles</p>
+                </div>
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">Opportunities</p>
+                  <p className="sbc-metric-value mono">{scoutCounts.companiesHiring}</p>
+                  <p className="sbc-metric-sub">Hiring now</p>
+                </div>
+              </div>
+            </section>
+
+            <button
+              type="button"
+              className="sbc-generate"
+              onClick={() => {
+                sweepScout();
+                flash("Brief rebuilt from Scout signals");
+              }}
+            >
+              Generate brief →
+            </button>
+            <p className="sbc-generate-note">Brief engine · territory-aware · Scout ready</p>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Today&apos;s brief snapshot</h2>
+                <button type="button" className="sbc-link" onClick={() => setScoutPane("today10")}>
+                  View all →
+                </button>
+              </div>
+              <div className="sbc-snap-grid">
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Accounts</p>
+                  <p className="sbc-metric-value mono">{bookCount}</p>
+                  <p className="sbc-metric-sub">Watching</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Today 10</p>
+                  <p className="sbc-metric-value mono">{scoutTen.length}</p>
+                  <p className="sbc-metric-sub">Prioritized</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">High priority</p>
+                  <p className="sbc-metric-value mono">{hotCount}</p>
+                  <p className="sbc-metric-sub">Hot list</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Alerts</p>
+                  <p className="sbc-metric-value mono">{gaps.length}</p>
+                  <p className="sbc-metric-sub">Phone gaps</p>
+                </div>
+              </div>
+              <blockquote className="sbc-quote">{briefFocus}</blockquote>
+            </section>
+
+            <div className="sbc-actions">
               <button
-                className="btn btn-primary"
+                type="button"
+                className="btn btn-ghost"
                 onClick={() => {
                   const subject = encodeURIComponent(`Scout Desk · Montgomery · ${todayIso()}`);
                   const body = encodeURIComponent(briefing);
@@ -3781,40 +4383,76 @@ export default function App() {
               >
                 Open in Gmail
               </button>
-              <button className="btn btn-ghost" onClick={() => void copyText(briefing, "Scout briefing")}>
-                Copy text
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => void copyText(briefing, "Scout briefing")}
+              >
+                Copy brief
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => void onSyncDrive()}>
+                Sync Drop
               </button>
             </div>
-            <pre className="q4-block" style={{ marginTop: "0.75rem", maxHeight: 360, overflow: "auto" }}>
-              {briefing}
-            </pre>
+            <div className="sbc-tools">
+              {(
+                [
+                  ["brief", "Market"],
+                  ["leads", "Leads"],
+                  ["today10", "Today 10"],
+                  ["jobs", "Jobs"],
+                  ["plan", "Plan"],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} type="button" className="sbc-tool" onClick={() => setScoutPane(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="sbc-foot">CliffsCRM · Scout · never invent phones, names, or pay</p>
           </div>
         )}
-      </>
+      </div>
     );
-  } else if (morePane === "hot" || morePane === "gone" || morePane === "hits" || morePane === "priority") {
+  } else if (
+    morePane === "lists" ||
+    morePane === "hot" ||
+    morePane === "gone" ||
+    morePane === "hits" ||
+    morePane === "priority"
+  ) {
+    const listKey: ListsFilter =
+      morePane === "lists"
+        ? listsFilter
+        : morePane === "hot"
+          ? "hot"
+          : morePane === "gone"
+            ? "gone"
+            : morePane === "hits"
+              ? "hits"
+              : "priority";
     const title =
-      morePane === "hot"
+      listKey === "hot"
         ? "Hot Sheet"
-        : morePane === "gone"
+        : listKey === "gone"
           ? "Gone quiet"
-          : morePane === "hits"
+          : listKey === "hits"
             ? "Hit List"
             : "Priority list";
     const blurb =
-      morePane === "hot"
+      listKey === "hot"
         ? "Hiring signals, jackpot, first-year, and missing clients"
-        : morePane === "gone"
+        : listKey === "gone"
           ? "No recent talk or overdue callbacks — win them back"
-          : morePane === "hits"
+          : listKey === "hits"
             ? "Accounts you flagged from Accounts or company cards"
             : "Meetings and callbacks first, then Hot Sheet";
     const rows =
-      morePane === "hot"
+      listKey === "hot"
         ? buildHotSheet(liveCompanies)
-        : morePane === "gone"
+        : listKey === "gone"
           ? buildGoneQuiet(liveCompanies)
-          : morePane === "hits"
+          : listKey === "hits"
             ? buildHitList(liveCompanies)
             : buildPriority(liveCompanies, wrapUps);
     main = (
@@ -3823,15 +4461,37 @@ export default function App() {
           ← More
         </button>
         <div className="section-head">
-          <h1>{title}</h1>
+          <h1>Lists</h1>
           <p>
-            {blurb} · {rows.length}
+            {title} · {blurb} · {rows.length}
           </p>
+        </div>
+        <div className="filter-rail" role="toolbar" aria-label="List type">
+          {(
+            [
+              ["hot", "Hot"],
+              ["gone", "Quiet"],
+              ["hits", "Hits"],
+              ["priority", "Priority"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip ${listKey === id ? "active" : ""}`}
+              onClick={() => {
+                setListsFilter(id);
+                setMorePane("lists");
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {!rows.length ? (
           <div className="card">
             <p className="empty">
-              {morePane === "hits"
+              {listKey === "hits"
                 ? "No Hit List yet — open an account and tap Add to Hit List."
                 : "Nothing here until Contact Summary / Sales Planner / research lands."}
             </p>
@@ -4071,43 +4731,104 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "dock") {
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("settings")}>
+          ← Settings
+        </button>
+        <div className="section-head">
+          <h1>Rearrange dock</h1>
+          <p>
+            First four stay pinned: Dashboard · Dialer · Today · Scout. Drag the bottom bar left for MPC,
+            Accounts, Q4, More — reorder those here.
+          </p>
+        </div>
+        <div className="card">
+          {dockOrder.map((id, i) => (
+            <div key={id} className="dock-edit-row">
+              <strong>
+                {DOCK_META[id].label}
+                {i < 4 ? <span className="subtle"> · pinned</span> : null}
+              </strong>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={i === 0 || (i === 4)}
+                onClick={() => setDockOrder((d) => moveDockItem(d, i, -1))}
+              >
+                Up
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={i === dockOrder.length - 1 || i === 3}
+                onClick={() => setDockOrder((d) => moveDockItem(d, i, 1))}
+              >
+                Down
+              </button>
+            </div>
+          ))}
+          <button
+            className="btn btn-ghost btn-block"
+            style={{ marginTop: "0.75rem" }}
+            onClick={() => setDockOrder([...DEFAULT_DOCK])}
+          >
+            Reset to Dashboard · Dialer · Today · Scout · …
+          </button>
+        </div>
+      </>
+    );
+  } else if (morePane === "gallery") {
+    const base = import.meta.env.BASE_URL || "/";
+    const galleryBase = `${base.endsWith("/") ? base : `${base}/`}design-gallery/`;
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Design gallery</h1>
+          <p>Reference comps · Field Desk is the locked product direction</p>
+        </div>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <iframe
+            title="CliffsCRM design gallery"
+            src={galleryBase}
+            style={{ display: "block", width: "100%", height: "min(78vh, 52rem)", border: 0, background: "#050a08" }}
+          />
+        </div>
+        <a className="btn btn-primary btn-block" href={galleryBase} target="_blank" rel="noreferrer">
+          Open gallery full screen
+        </a>
+      </>
+    );
   } else {
     main = (
       <>
         <div className="section-head">
           <h1>More</h1>
-          <p>Montgomery desk · {OFFICE.agentName}</p>
+          <p>Secondary tools — Home widgets cover the daily path.</p>
         </div>
         <div className="panel">
-          <button className="menu-link" onClick={() => setMorePane("blitz")}>
-            Team desk / Blitz <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
-            Blitz assign <span>→</span>
-          </button>
+          <p className="menu-group-label">Work</p>
           <button
             className="menu-link"
             onClick={() => {
               setMorePane("scout");
-              setScoutPane("brief");
+              setScoutPane("briefing");
             }}
           >
             Scout Desk <span>→</span>
           </button>
-          <button className="menu-link" onClick={() => setMorePane("research")}>
-            Research book <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("hot")}>
-            Hot Sheet <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("gone")}>
-            Gone quiet <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("priority")}>
-            Priority list <span>→</span>
-          </button>
-          <button className="menu-link" onClick={() => setMorePane("hits")}>
-            Hit List <span>→</span>
+          <button
+            className="menu-link"
+            onClick={() => {
+              setMorePane("lists");
+              setListsFilter("hot");
+            }}
+          >
+            Lists (Hot · Quiet · Hits) <span>→</span>
           </button>
           <button className="menu-link" onClick={() => setMorePane("daily")}>
             Daily Report <span>→</span>
@@ -4115,29 +4836,66 @@ export default function App() {
           <button className="menu-link" onClick={() => setMorePane("newsletter")}>
             Morning brief <span>→</span>
           </button>
+          <p className="menu-group-label">Book</p>
           <button className="menu-link" onClick={() => setMorePane("import")}>
             Import CRM exports <span>→</span>
           </button>
+          <button className="menu-link" onClick={() => setMorePane("research")}>
+            Research book <span>→</span>
+          </button>
+          <p className="menu-group-label">Team</p>
+          <button className="menu-link" onClick={() => setMorePane("blitz")}>
+            Team desk / Blitz <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("blitz-assign")}>
+            Blitz assign <span>→</span>
+          </button>
+          <p className="menu-group-label">System</p>
+          <button className="menu-link" onClick={() => setMorePane("gallery")}>
+            Design gallery (36 comps) <span>→</span>
+          </button>
           <button className="menu-link" onClick={() => setMorePane("settings")}>
             Settings <span>→</span>
+          </button>
+          <button className="menu-link" onClick={() => setMorePane("dock")}>
+            Rearrange bottom dock <span>→</span>
           </button>
         </div>
       </>
     );
   }
 
+  const brandSub =
+    tab === "home"
+      ? "Dashboard"
+      : tab === "mpc"
+        ? selectedMpcCandidate
+          ? `MPC · ${selectedMpcCandidate.name}`
+          : "MPC match"
+        : tab === "accounts"
+          ? "Accounts book"
+          : tab === "q4"
+            ? "Q4 wrap"
+            : tab === "more"
+              ? morePane === "scout"
+                ? scoutPane === "briefing"
+                  ? "Scout briefing console"
+                  : "Scout desk"
+                : "Tools & settings"
+              : todayMode === "car" && carLead
+                ? `Car · ${carLead.name}`
+                : dayLead
+                  ? `Next · ${dayLead.company.name}`
+                  : "Today desk";
+
   return (
-    <div className={`app-shell${showDayBar ? " has-daybar" : ""}`}>
+    <div className={`app-shell${showDayBar ? " has-daybar" : ""}${tab === "today" || tab === "mpc" ? " has-filter-rail" : ""}`}>
       <header className="topbar">
         <div className="brand-block">
           <p className="brand-kicker">Express · Montgomery</p>
           <p className="brand-title">CliffsCRM</p>
           <p className="brand-sub">
-            {todayMode === "car" && carLead
-              ? `Car · ${carLead.name}`
-              : dayLead
-                ? `Next · ${dayLead.company.name}`
-                : "Field desk"}
+            {brandSub}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
@@ -4266,32 +5024,72 @@ export default function App() {
         +
       </button>
 
-      <nav className="tabbar tabbar-5" aria-label="Primary">
-        {(
-          [
-            ["today", "Today", IconHome, toDialCount || inbox.length],
-            ["mpc", "MPC", IconMpc, mpc.length],
-            ["accounts", "Accounts", IconBook, 0],
-            ["q4", "Q4", IconQ4, q4Pending],
-            ["more", "More", IconMore, 0],
-          ] as const
-        ).map(([id, label, Icon, badge]) => (
-          <button
-            key={id}
-            className={`tab ${tab === id ? "active" : ""}`}
-            onClick={() => {
-              setTab(id);
-              if (id === "more") setMorePane("home");
-            }}
-            aria-label={badge ? `${label}, ${badge}` : label}
-          >
-            <Icon />
-            <span className="tab-label">
-              {label}
-              {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
-            </span>
-          </button>
-        ))}
+      <nav className="tabbar tabbar-scroll" aria-label="Primary">
+        <div className="tabbar-track">
+          {dockOrder.map((id) => {
+            const label = DOCK_META[id].label;
+            const Icon = DOCK_ICONS[id];
+            const isActive =
+              id === "dialer"
+                ? tab === "today" && todayMode === "desk"
+                : id === "today"
+                  ? tab === "today" && todayMode === "car"
+                  : id === "scout"
+                    ? tab === "more" && morePane === "scout"
+                    : id === "more"
+                      ? tab === "more" && morePane !== "scout"
+                      : tab === id;
+            const badge =
+              id === "dialer" || id === "today"
+                ? toDialCount || inbox.length
+                : id === "mpc"
+                  ? mpc.length
+                  : id === "q4"
+                    ? q4Pending
+                    : id === "scout"
+                      ? scoutTen.length
+                      : id === "home"
+                        ? hotCount + q4Pending
+                        : 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`tab ${isActive ? "active" : ""}`}
+                onClick={() => {
+                  if (id === "home") {
+                    setTab("home");
+                  } else if (id === "dialer") {
+                    setTodayMode("desk");
+                    setTab("today");
+                  } else if (id === "today") {
+                    setTodayMode("car");
+                    setTab("today");
+                  } else if (id === "scout") {
+                    setTab("more");
+                    setMorePane("scout");
+                    setScoutPane("briefing");
+                  } else if (id === "more") {
+                    setTab("more");
+                    setMorePane("home");
+                  } else {
+                    setTab(id);
+                  }
+                }}
+                aria-label={badge ? `${label}, ${badge}` : label}
+              >
+                <Icon />
+                <span className="tab-label">
+                  {label}
+                  {badge > 0 ? <span className="tab-badge">{badge > 9 ? "9+" : badge}</span> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="tabbar-hint" aria-hidden="true">
+          Drag left for more
+        </p>
       </nav>
 
       {toast && <div className="toast">{toast}</div>}

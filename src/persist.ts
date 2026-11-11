@@ -2,6 +2,7 @@ import { isDemoCompany, type Company, type Dialer } from "./data";
 import type { MpcCandidate } from "./mpc";
 import { DEFAULT_NEWSLETTER_PREFS, type NewsletterPrefs } from "./newsletter";
 import { DEFAULT_SCOUT_PREFS, type ScoutJob, type ScoutPrefs } from "./scout";
+import { DEFAULT_DOCK, normalizeDock, type DockId } from "./shell";
 import type { CaptureItem, WrapUp } from "./wrapup";
 
 export const STORAGE_KEY = "cliffscrm-prototype-v4";
@@ -25,6 +26,8 @@ export type Persisted = {
   mpcDropFolderName: string;
   scoutJobs: ScoutJob[];
   scoutPrefs: ScoutPrefs;
+  /** Rearrangeable bottom dock shortcuts */
+  dockOrder: DockId[];
 };
 
 export function defaultPersisted(): Persisted {
@@ -45,6 +48,7 @@ export function defaultPersisted(): Persisted {
     mpcDropFolderName: "",
     scoutJobs: [],
     scoutPrefs: { ...DEFAULT_SCOUT_PREFS },
+    dockOrder: [...DEFAULT_DOCK],
   };
 }
 
@@ -80,6 +84,7 @@ export function loadState(): Persisted {
       mpcDropFolderName: typeof parsed.mpcDropFolderName === "string" ? parsed.mpcDropFolderName : "",
       scoutJobs: Array.isArray(parsed.scoutJobs) ? (parsed.scoutJobs as ScoutJob[]).slice(0, 500) : [],
       scoutPrefs: { ...DEFAULT_SCOUT_PREFS, ...(parsed.scoutPrefs || {}) },
+      dockOrder: normalizeDock((parsed as { dockOrder?: unknown }).dockOrder),
       importLog:
         companies.length === 0 && (!parsed.importLog || /demo/i.test(parsed.importLog || ""))
           ? defaultPersisted().importLog
