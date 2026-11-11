@@ -701,7 +701,7 @@ export default function App() {
   const [suggestBusy, setSuggestBusy] = useState(false);
   const [scoutJobs, setScoutJobs] = useState<ScoutJob[]>(initial.scoutJobs || []);
   const [scoutPrefs, setScoutPrefs] = useState<ScoutPrefs>(initial.scoutPrefs || DEFAULT_SCOUT_PREFS);
-  const [scoutPane, setScoutPane] = useState<ScoutPane>("brief");
+  const [scoutPane, setScoutPane] = useState<ScoutPane>("briefing");
   const [scoutPaste, setScoutPaste] = useState("");
   const [scoutQuery, setScoutQuery] = useState("");
   const [scoutCalDay, setScoutCalDay] = useState(todayIso());
@@ -974,7 +974,7 @@ export default function App() {
     if (id === "scout") {
       setTab("more");
       setMorePane("scout");
-      setScoutPane("brief");
+      setScoutPane("briefing");
       return;
     }
     if (id === "lists") {
@@ -1892,7 +1892,7 @@ export default function App() {
             onClick={() => {
               setTab("more");
               setMorePane("scout");
-              setScoutPane("brief");
+              setScoutPane("briefing");
             }}
           >
             Later · Scout
@@ -1996,7 +1996,7 @@ export default function App() {
                 } else if (id === "scout") {
                   setTab("more");
                   setMorePane("scout");
-                  setScoutPane("brief");
+                  setScoutPane("briefing");
                 } else if (id === "q4") {
                   setTab("q4");
                 }
@@ -3676,29 +3676,42 @@ export default function App() {
     const war = competitorBoard(allScoutJobs);
     const gaps = phoneGapQueue(allScoutJobs);
     const hyundai = hyundaiPark(allScoutJobs);
+    const pasteJobs = allScoutJobs.filter((j) => j.source === "paste").slice(0, 8);
+    const consoleJobs =
+      pasteJobs.length > 0
+        ? pasteJobs
+        : scoutTen.slice(0, 5).map((j) => ({ ...j, source: j.source || ("book" as const) }));
+    const lastSyncLabel = scoutPrefs.lastSweepAt
+      ? new Date(scoutPrefs.lastSweepAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "Not yet";
+    const syncAgo = scoutPrefs.lastSweepAt
+      ? Math.max(0, Math.round((now - new Date(scoutPrefs.lastSweepAt).getTime()) / 60000))
+      : null;
+    const briefFocus =
+      briefing
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 40 && !l.startsWith("—") && !l.startsWith("Cliffs")) ||
+      "Focus on hiring signals and stalled visits. File Scout finds into the book — never invent phones.";
+    const localTime = new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     main = (
-      <>
-        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
-          ← More
-        </button>
-        <div className="section-head">
-          <h1>Scout Desk</h1>
-          <p>
-            Montgomery territory · private employers only · Hyundai parked · Q4 appointments never
-            overridden
-          </p>
-        </div>
+      <div className={`scout-console${scoutPane === "briefing" ? " scout-console-focus" : ""}`}>
+        {scoutPane !== "briefing" ? (
+          <button className="btn btn-ghost scout-back" onClick={() => setScoutPane("briefing")}>
+            ← Briefing console
+          </button>
+        ) : null}
         <div className="segment scout-segment">
           {(
             [
-              ["brief", "Brief"],
+              ["briefing", "Console"],
+              ["brief", "Market"],
               ["leads", "Leads"],
               ["today10", "Today 10"],
               ["jobs", "Jobs"],
               ["prospect", "Prospect"],
               ["plan", "Plan"],
               ["contacts", "Contacts"],
-              ["briefing", "Briefing"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -4225,26 +4238,143 @@ export default function App() {
         )}
 
         {scoutPane === "briefing" && (
-          <div className="panel">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Morning briefing</h2>
-              <button className="btn btn-ghost" onClick={() => sweepScout()}>
-                Rebuild
-              </button>
+          <div className="scout-briefing-console">
+            <header className="sbc-top">
+              <div className="sbc-brand">
+                <div className="sbc-mark" aria-hidden="true" />
+                <div>
+                  <p className="sbc-title">Cliffs CRM</p>
+                  <p className="sbc-sub">Scout briefing console</p>
+                </div>
+              </div>
+            </header>
+
+            <div className="sbc-operator">
+              <div className="sbc-avatar" aria-hidden="true" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p className="sbc-kicker">Field desk</p>
+                <p className="sbc-operator-name">Morning intel · {OFFICE.agentName.split(" ")[0]}</p>
+              </div>
+              <div className="sbc-local">
+                <span className="sbc-sun" aria-hidden="true" />
+                <span>{localTime} local</span>
+              </div>
             </div>
-            <p className="subtle">
-              Built after each sweep. Open in Gmail or copy. Default morning rebuild when you open
-              Scout.
-            </p>
-            <label className="subtle">Recipient (saved on this device)</label>
-            <input
-              className="field-input"
-              value={scoutPrefs.briefingEmail}
-              onChange={(e) => setScoutPrefs((p) => ({ ...p, briefingEmail: e.target.value }))}
-            />
-            <div className="row wrap" style={{ gap: "0.45rem", marginTop: "0.55rem" }}>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Briefing paste jobs</h2>
+                <button
+                  type="button"
+                  className="sbc-link"
+                  onClick={() => setScoutPane("jobs")}
+                  aria-label="Paste jobs help"
+                >
+                  Paste
+                </button>
+              </div>
+              <div className="sbc-card">
+                {!consoleJobs.length && (
+                  <p className="sbc-empty">
+                    Paste hiring lines on Jobs, or Sweep Market — Q4 appointments stay locked.
+                  </p>
+                )}
+                {consoleJobs.map((j) => {
+                  const ready = !!j.company && !!j.title;
+                  return (
+                    <div key={j.id} className="sbc-job-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p className="sbc-job-meta">Pasted job</p>
+                        <p className="sbc-job-title">
+                          {j.company}
+                          {j.title ? ` — ${j.title}` : ""}
+                        </p>
+                      </div>
+                      <div className={`sbc-status ${ready ? "ready" : "pending"}`}>
+                        <span className="sbc-dot" />
+                        {ready ? "Ready" : "Pending"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Sync row</h2>
+                <p className="sbc-sync-meta">
+                  Last sync: {lastSyncLabel}
+                  {syncAgo != null ? ` (${syncAgo}m ago)` : ""}
+                </p>
+              </div>
+              <div className="sbc-sync-grid">
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">CRM records</p>
+                  <p className="sbc-metric-value mono">{bookCount.toLocaleString()}</p>
+                  <p className="sbc-metric-sub">In book</p>
+                </div>
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">Activity feed</p>
+                  <p className="sbc-metric-value mono">{scoutCounts.openRoles}</p>
+                  <p className="sbc-metric-sub">Open roles</p>
+                </div>
+                <div className="sbc-metric">
+                  <p className="sbc-metric-label">Opportunities</p>
+                  <p className="sbc-metric-value mono">{scoutCounts.companiesHiring}</p>
+                  <p className="sbc-metric-sub">Hiring now</p>
+                </div>
+              </div>
+            </section>
+
+            <button
+              type="button"
+              className="sbc-generate"
+              onClick={() => {
+                sweepScout();
+                flash("Brief rebuilt from Scout signals");
+              }}
+            >
+              Generate brief →
+            </button>
+            <p className="sbc-generate-note">Brief engine · territory-aware · Scout ready</p>
+
+            <section className="sbc-section">
+              <div className="sbc-section-head">
+                <h2>Today&apos;s brief snapshot</h2>
+                <button type="button" className="sbc-link" onClick={() => setScoutPane("today10")}>
+                  View all →
+                </button>
+              </div>
+              <div className="sbc-snap-grid">
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Accounts</p>
+                  <p className="sbc-metric-value mono">{bookCount}</p>
+                  <p className="sbc-metric-sub">Watching</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Today 10</p>
+                  <p className="sbc-metric-value mono">{scoutTen.length}</p>
+                  <p className="sbc-metric-sub">Prioritized</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">High priority</p>
+                  <p className="sbc-metric-value mono">{hotCount}</p>
+                  <p className="sbc-metric-sub">Hot list</p>
+                </div>
+                <div className="sbc-snap">
+                  <p className="sbc-metric-label">Alerts</p>
+                  <p className="sbc-metric-value mono">{gaps.length}</p>
+                  <p className="sbc-metric-sub">Phone gaps</p>
+                </div>
+              </div>
+              <blockquote className="sbc-quote">{briefFocus}</blockquote>
+            </section>
+
+            <div className="sbc-actions">
               <button
-                className="btn btn-primary"
+                type="button"
+                className="btn btn-ghost"
                 onClick={() => {
                   const subject = encodeURIComponent(`Scout Desk · Montgomery · ${todayIso()}`);
                   const body = encodeURIComponent(briefing);
@@ -4253,16 +4383,36 @@ export default function App() {
               >
                 Open in Gmail
               </button>
-              <button className="btn btn-ghost" onClick={() => void copyText(briefing, "Scout briefing")}>
-                Copy text
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => void copyText(briefing, "Scout briefing")}
+              >
+                Copy brief
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => void onSyncDrive()}>
+                Sync Drop
               </button>
             </div>
-            <pre className="q4-block" style={{ marginTop: "0.75rem", maxHeight: 360, overflow: "auto" }}>
-              {briefing}
-            </pre>
+            <div className="sbc-tools">
+              {(
+                [
+                  ["brief", "Market"],
+                  ["leads", "Leads"],
+                  ["today10", "Today 10"],
+                  ["jobs", "Jobs"],
+                  ["plan", "Plan"],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} type="button" className="sbc-tool" onClick={() => setScoutPane(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="sbc-foot">CliffsCRM · Scout · never invent phones, names, or pay</p>
           </div>
         )}
-      </>
+      </div>
     );
   } else if (
     morePane === "lists" ||
@@ -4666,7 +4816,7 @@ export default function App() {
             className="menu-link"
             onClick={() => {
               setMorePane("scout");
-              setScoutPane("brief");
+              setScoutPane("briefing");
             }}
           >
             Scout Desk <span>→</span>
@@ -4914,7 +5064,7 @@ export default function App() {
                   } else if (id === "scout") {
                     setTab("more");
                     setMorePane("scout");
-                    setScoutPane("brief");
+                    setScoutPane("briefing");
                   } else if (id === "more") {
                     setTab("more");
                     setMorePane("home");
