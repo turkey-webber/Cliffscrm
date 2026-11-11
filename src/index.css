@@ -1,36 +1,39 @@
 :root {
-  /* Command Deck — field ops clarity, Express signal lime */
-  --ink: #070c0a;
-  --ink-2: #121a17;
-  --paper: #eef1ef;
-  --paper-2: #e2e8e4;
-  --line: #c2cdc6;
-  --muted: #53635b;
-  --subtle: #718078;
-  --signal: #c6ff4a;
-  --signal-ink: #0e1808;
-  --call: #0b6b53;
-  --call-fg: #ecfff7;
-  --warn: #c99212;
-  --warn-bg: #f3e7c0;
-  --danger: #c23b2e;
-  --danger-bg: #f8e4e0;
+  /* Field Desk — calm staffing CRM, Express lime accent (no military HUD) */
+  --ink: #0b1511;
+  --ink-2: #15201b;
+  --paper: #f2f5f3;
+  --paper-2: #e6ece8;
+  --line: #c8d2cc;
+  --muted: #55665d;
+  --subtle: #6f8077;
+  --signal: #b8e84a;
+  --signal-ink: #13200a;
+  --call: #0f6b55;
+  --call-fg: #f2fffa;
+  --warn: #b98518;
+  --warn-bg: #f5ebcf;
+  --danger: #b83d32;
+  --danger-bg: #f7e6e2;
   --locked: #e8d48a;
-  --called: #d5ddd6;
+  --called: #d8dfd9;
   --elev: #ffffff;
-  --rail: color-mix(in srgb, #0b1210 6%, white);
+  --rail: color-mix(in srgb, #0b1511 5%, white);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   font-family: "DM Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    linear-gradient(180deg, #070c0a 0 8rem, transparent 8rem),
-    radial-gradient(80% 42% at 100% 0%, #163528 0%, transparent 58%),
-    radial-gradient(60% 40% at 0% 8%, #0d1f18 0%, transparent 50%),
+    linear-gradient(180deg, #0b1511 0 7.25rem, transparent 7.25rem),
+    radial-gradient(70% 38% at 100% 0%, #1a3328 0%, transparent 55%),
     var(--paper);
   line-height: 1.45;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: color-mix(in srgb, var(--signal) 45%, white);
+  color: var(--signal-ink);
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; min-height: 100%; height: 100%; }
@@ -822,7 +825,7 @@ textarea { min-height: 6.5rem; resize: vertical; }
   .brand-title { font-size: 1.55rem; }
 }
 
-/* —— Command Deck: filter rail, home widgets, dock —— */
+/* —— Field Desk: filter rail, home next-card, tools, dock —— */
 .filter-rail {
   display: flex;
   gap: 0.4rem;
@@ -844,10 +847,11 @@ textarea { min-height: 6.5rem; resize: vertical; }
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.01em;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 .filter-chip.active {
   background: var(--ink);
-  color: var(--signal);
+  color: #f4fff0;
   border-color: var(--ink);
 }
 .filter-chip .count {
@@ -857,7 +861,7 @@ textarea { min-height: 6.5rem; resize: vertical; }
   font-variant-numeric: tabular-nums;
 }
 .home-hero {
-  margin: 0 0 1rem;
+  margin: 0 0 0.85rem;
 }
 .home-hero h1 {
   margin: 0;
@@ -865,9 +869,66 @@ textarea { min-height: 6.5rem; resize: vertical; }
   line-height: 1.05;
 }
 .home-hero p {
-  margin: 0.45rem 0 0;
+  margin: 0.4rem 0 0;
   color: var(--muted);
   font-size: 0.95rem;
+}
+.home-next {
+  background: var(--ink);
+  color: #eef6f0;
+  border-radius: 1rem;
+  padding: 1rem 1.05rem;
+  margin: 0 0 0.85rem;
+  animation: home-next-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes home-next-in {
+  from { opacity: 0; transform: translateY(0.35rem); }
+  to { opacity: 1; transform: none; }
+}
+.home-next .home-next-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--signal) 70%, white);
+}
+.home-next h2 {
+  margin: 0.35rem 0 0;
+  font-size: 1.35rem;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+.home-next p {
+  margin: 0.35rem 0 0;
+  color: #b7c7bc;
+  font-size: 0.88rem;
+}
+.home-next .home-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+.home-focus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.85rem;
+}
+.home-focus button {
+  border: 1px solid var(--line);
+  background: var(--elev);
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.home-focus button.on {
+  background: color-mix(in srgb, var(--call) 14%, white);
+  border-color: color-mix(in srgb, var(--call) 35%, var(--line));
+  color: var(--call);
 }
 .home-stats {
   display: grid;
@@ -879,13 +940,13 @@ textarea { min-height: 6.5rem; resize: vertical; }
   background: var(--elev);
   border: 1px solid var(--line);
   border-radius: 0.7rem;
-  padding: 0.7rem 0.5rem;
+  padding: 0.65rem 0.45rem;
   text-align: center;
 }
 .home-stat strong {
   display: block;
   font-family: Syne, sans-serif;
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   letter-spacing: -0.03em;
 }
 .home-stat span {
@@ -904,48 +965,47 @@ textarea { min-height: 6.5rem; resize: vertical; }
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.55rem;
+  gap: 0.45rem;
   text-align: left;
-  min-height: 6.5rem;
-  padding: 0.9rem;
-  border-radius: 0.9rem;
+  min-height: 5.8rem;
+  padding: 0.85rem;
+  border-radius: 0.85rem;
   border: 1px solid var(--line);
-  background:
-    linear-gradient(160deg, color-mix(in srgb, var(--signal) 10%, white), white 42%),
-    var(--elev);
+  background: var(--elev);
   color: var(--ink);
   touch-action: manipulation;
+  transition: transform 120ms ease, border-color 160ms ease;
 }
 .widget-tile:active {
   transform: scale(0.985);
 }
 .widget-tile .widget-icon {
-  width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 0.65rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 0.55rem;
   display: grid;
   place-items: center;
-  background: var(--ink);
-  color: var(--signal);
-  font-size: 0.95rem;
+  background: color-mix(in srgb, var(--call) 12%, white);
+  color: var(--call);
+  font-size: 0.85rem;
   font-weight: 800;
 }
 .widget-tile .widget-label {
   font-family: Syne, sans-serif;
-  font-size: 1.02rem;
+  font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
 .widget-tile .widget-blurb {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1.3;
 }
 .widget-tile .widget-badge {
   margin-left: auto;
   background: var(--ink);
-  color: var(--signal);
+  color: #f4fff0;
   border-radius: 0.35rem;
   padding: 0.15rem 0.4rem;
   font-size: 0.68rem;
@@ -957,6 +1017,12 @@ textarea { min-height: 6.5rem; resize: vertical; }
   align-items: center;
   gap: 0.4rem;
 }
+.travel-add details > summary {
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+.travel-add details > summary::-webkit-details-marker { display: none; }
 .dock-edit-row {
   display: flex;
   align-items: center;

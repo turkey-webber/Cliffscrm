@@ -38,6 +38,7 @@ import {
 import {
   DEFAULT_DOCK,
   DOCK_META,
+  HOME_MORE_WIDGETS,
   HOME_WIDGETS,
   moveDockItem,
   normalizeDock,
@@ -1783,11 +1784,95 @@ export default function App() {
   let main: ReactNode = null;
 
   if (tab === "home") {
+    const nextCompany = dayLead?.company ?? null;
     main = (
       <>
         <div className="home-hero">
-          <h1>Home</h1>
-          <p>{OFFICE.agentName.split(" ")[0]}’s command deck — open a tool, work the day.</p>
+          <h1>Your day</h1>
+          <p>
+            {OFFICE.agentName.split(" ")[0]} · Express Montgomery — one next step, then the tools you need.
+          </p>
+        </div>
+        {nextCompany ? (
+          <div className="home-next">
+            <p className="home-next-label">Next up · {todayMode === "car" ? "Car" : "Office"}</p>
+            <h2>{nextCompany.name}</h2>
+            <p>
+              {dayLead?.why || companyTypeLabel(nextCompany)}
+              {nextCompany.contactName ? ` · ${nextCompany.contactName}` : ""}
+              {nextCompany.phone ? ` · ${nextCompany.phone}` : " · No phone on file"}
+            </p>
+            <div className="home-next-actions">
+              {nextCompany.phone ? (
+                <button
+                  type="button"
+                  className="btn btn-accent"
+                  onClick={() => {
+                    setActiveId(nextCompany.id);
+                    setTodayMode("desk");
+                    setTab("today");
+                    dial(nextCompany);
+                  }}
+                >
+                  Call
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                onClick={() => {
+                  setActiveId(nextCompany.id);
+                  setTab("today");
+                }}
+              >
+                Open Today
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                onClick={() => addToTravelList(nextCompany.id)}
+              >
+                {isOnTravelList(nextCompany) ? "On travel" : "Add to travel"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="demo-banner" style={{ marginBottom: "0.85rem" }}>
+            {liveCompanies.length
+              ? "Nothing queued — sync Drop, open Lists, or add a travel stop."
+              : "Sync Contact Summary + Sales Planner from Drop to start the day."}
+            <button
+              className="btn btn-accent btn-block"
+              style={{ marginTop: "0.65rem" }}
+              disabled={!!importBusy}
+              onClick={() => (liveCompanies.length ? setTab("today") : void onSyncDrive())}
+            >
+              {liveCompanies.length ? "Open Today" : importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+            </button>
+          </div>
+        )}
+        <div className="home-focus" aria-label="Now next later">
+          <button type="button" className="on" onClick={() => setTab("today")}>
+            Now · Today
+          </button>
+          <button
+            type="button"
+            onClick={() => (q4Pending ? setTab("q4") : setTab("today"))}
+          >
+            Next · {q4Pending ? `Q4 (${q4Pending})` : "Car / travel"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTab("more");
+              setMorePane("scout");
+              setScoutPane("brief");
+            }}
+          >
+            Later · Scout
+          </button>
         </div>
         <div className="home-stats" aria-label="Day snapshot">
           <div className="home-stat">
@@ -1807,7 +1892,7 @@ export default function App() {
             <span>Visits</span>
           </div>
         </div>
-        <div className="widget-grid" aria-label="Most used tools">
+        <div className="widget-grid" aria-label="Primary tools">
           {HOME_WIDGETS.map((w) => {
             const badge = widgetBadges[w.id];
             return (
@@ -1822,6 +1907,17 @@ export default function App() {
             );
           })}
         </div>
+        <div className="widget-grid" style={{ marginTop: "0.65rem", opacity: 0.92 }} aria-label="More tools">
+          {HOME_MORE_WIDGETS.map((w) => (
+            <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
+              <div className="widget-head">
+                <span className="widget-icon">{w.label.slice(0, 1)}</span>
+              </div>
+              <span className="widget-label">{w.label}</span>
+              <span className="widget-blurb">{w.blurb}</span>
+            </button>
+          ))}
+        </div>
       </>
     );
   } else if (tab === "today") {
@@ -1833,8 +1929,8 @@ export default function App() {
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Office — call the Next card; sticky bar does the rest"
-              : "Car — navigate the loop; Arrived logs the visit"}
+              ? "Office — call the next company; save wraps as you go"
+              : "Car — navigate stops; Arrived logs the visit"}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
             {staleInbox.length ? ` · ${staleInbox.length} stale` : ""}
           </p>
@@ -1906,53 +2002,55 @@ export default function App() {
           </button>
         </div>
         <div className="panel travel-add">
-          <h2 style={{ marginTop: 0, marginBottom: "0.35rem", fontSize: "1rem" }}>Add to travel list</h2>
-          <p className="subtle" style={{ marginTop: 0 }}>
-            Type a company — recognized from your book with type — then add to the Car loop.
-          </p>
-          <div className="search" style={{ marginBottom: travelMatches.length ? "0.35rem" : "0" }}>
-            <span className="subtle">⌕</span>
-            <input
-              placeholder="Type company name…"
-              value={travelQuery}
-              onChange={(e) => setTravelQuery(e.target.value)}
-              aria-label="Find company for travel list"
-              autoComplete="off"
-            />
-          </div>
-          {travelQuery.trim() && !travelMatches.length && (
-            <p className="empty" style={{ margin: "0.35rem 0 0" }}>
-              No book match. Search Accounts or Sync Drop first — never invent a company.
+          <details open={todayMode === "car" || !!travelQuery.trim()}>
+            <summary>Add stop to travel list</summary>
+            <p className="subtle" style={{ marginTop: "0.45rem" }}>
+              Type a book company — we show its type — then add it to the Car loop.
             </p>
-          )}
-          {!!travelMatches.length && (
-            <div className="travel-match-list" role="listbox" aria-label="Recognized companies">
-              {travelMatches.map((c) => {
-                const onList = isOnTravelList(c);
-                return (
-                  <div key={c.id} className="travel-match" role="option" aria-selected={false}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <strong>{c.name}</strong>
-                      <div className="muted">
-                        <span className="chip" style={{ marginRight: "0.35rem" }}>
-                          {companyTypeLabel(c)}
-                        </span>
-                        {[c.city, c.contactName].filter(Boolean).join(" · ") || "In book"}
-                        {onList ? " · already on list" : ""}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className={onList ? "btn btn-ghost" : "btn btn-primary"}
-                      onClick={() => addToTravelList(c.id)}
-                    >
-                      {onList ? "Open Car" : "Add stop"}
-                    </button>
-                  </div>
-                );
-              })}
+            <div className="search" style={{ marginBottom: travelMatches.length ? "0.35rem" : "0" }}>
+              <span className="subtle">⌕</span>
+              <input
+                placeholder="Type company name…"
+                value={travelQuery}
+                onChange={(e) => setTravelQuery(e.target.value)}
+                aria-label="Find company for travel list"
+                autoComplete="off"
+              />
             </div>
-          )}
+            {travelQuery.trim() && !travelMatches.length && (
+              <p className="empty" style={{ margin: "0.35rem 0 0" }}>
+                No book match. Search Accounts or Sync Drop first — never invent a company.
+              </p>
+            )}
+            {!!travelMatches.length && (
+              <div className="travel-match-list" role="listbox" aria-label="Recognized companies">
+                {travelMatches.map((c) => {
+                  const onList = isOnTravelList(c);
+                  return (
+                    <div key={c.id} className="travel-match" role="option" aria-selected={false}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong>{c.name}</strong>
+                        <div className="muted">
+                          <span className="chip" style={{ marginRight: "0.35rem" }}>
+                            {companyTypeLabel(c)}
+                          </span>
+                          {[c.city, c.contactName].filter(Boolean).join(" · ") || "In book"}
+                          {onList ? " · already on list" : ""}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={onList ? "btn btn-ghost" : "btn btn-primary"}
+                        onClick={() => addToTravelList(c.id)}
+                      >
+                        {onList ? "Open Car" : "Add stop"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </details>
         </div>
         <div className="day-progress" aria-label="Daily progress">
           <span>
@@ -2001,7 +2099,7 @@ export default function App() {
         {todayMode === "desk" && lead && (
           <div className="dial-cockpit">
             <div className="hero-call">
-              <p className="eyebrow">Auto dial · {lead.motion}</p>
+              <p className="eyebrow">Next call · {lead.motion}</p>
               <h2>{lead.company.name}</h2>
               <p>
                 {lead.why}
@@ -2467,7 +2565,7 @@ export default function App() {
       <>
         <div className="section-head">
           <h1>MPC</h1>
-          <p>Resume in → pair with companies in and not in your book → research links out.</p>
+          <p>Fit leaderboard — resume skills vs jobs, Great/Good/Fair, then call or add.</p>
         </div>
         <div className="panel">
           <h2>Receive candidate</h2>
@@ -2767,8 +2865,9 @@ export default function App() {
         <div className="section-head">
           <h1>Accounts</h1>
           <p>
-            Contact Summary book · {bookCount} in book
+            Search the book · {bookCount} in book
             {liveCompanies.length ? ` · ${liveCompanies.length} total` : ""}
+            · Add travel from any row
           </p>
         </div>
         <div className="search">
@@ -2823,9 +2922,9 @@ export default function App() {
     main = (
       <>
         <div className="section-head">
-          <h1>Q4 sheet</h1>
+          <h1>Q4</h1>
           <p>
-            {doneCount} of {dayWraps.length} entered in Q4
+            Close the day · {doneCount} of {dayWraps.length} wraps entered
           </p>
         </div>
         <div className="card">
@@ -4510,7 +4609,7 @@ export default function App() {
         </button>
         <div className="section-head">
           <h1>Design gallery</h1>
-          <p>36 futuristic comps · Decide tab has the recommended stack · discussion only</p>
+          <p>Reference comps · Field Desk is the locked product direction</p>
         </div>
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <iframe
@@ -4588,7 +4687,7 @@ export default function App() {
 
   const brandSub =
     tab === "home"
-      ? "Command deck"
+      ? "Your day"
       : tab === "mpc"
         ? selectedMpcCandidate
           ? `MPC · ${selectedMpcCandidate.name}`

@@ -32,14 +32,18 @@ export type HomeWidget = {
   blurb: string;
 };
 
+/** Primary Home tools — Brief / Import / Settings live under More. */
 export const HOME_WIDGETS: HomeWidget[] = [
-  { id: "today", label: "Today desk", blurb: "Office / Car loop" },
-  { id: "mpc", label: "MPC match", blurb: "Resume → market fit" },
+  { id: "today", label: "Today", blurb: "Calls & Car stops" },
+  { id: "mpc", label: "MPC", blurb: "Resume ↔ jobs" },
   { id: "scout", label: "Scout", blurb: "Hiring signals" },
-  { id: "q4", label: "Q4 wrap", blurb: "Close the day" },
+  { id: "q4", label: "Q4", blurb: "Close wraps" },
   { id: "lists", label: "Lists", blurb: "Hot · Quiet · Hits" },
   { id: "capture", label: "Capture", blurb: "Notes & photos" },
-  { id: "brief", label: "Morning brief", blurb: "Newsletter" },
+];
+
+export const HOME_MORE_WIDGETS: HomeWidget[] = [
+  { id: "brief", label: "Morning brief", blurb: "Daily email" },
   { id: "import", label: "Import", blurb: "Drive / files" },
   { id: "settings", label: "Settings", blurb: "Dialer · dock" },
 ];
