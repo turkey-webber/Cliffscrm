@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_POINTS,
   OFFICE,
+  companyTypeLabel,
   isDemoCompany,
   is2x,
+  isOnTravelList,
   matchCompany,
   resultLabel,
   scoreFor,
+  searchBookCompanies,
   type CallResult,
   type Company,
   type Dialer,
@@ -683,6 +686,7 @@ export default function App() {
   const [scoutPaste, setScoutPaste] = useState("");
   const [scoutQuery, setScoutQuery] = useState("");
   const [scoutCalDay, setScoutCalDay] = useState(todayIso());
+  const [travelQuery, setTravelQuery] = useState("");
   const [dossierById, setDossierById] = useState<Record<string, CompanyDossier>>({});
   const [dossierBusy, setDossierBusy] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -1346,6 +1350,32 @@ export default function App() {
     flash("Nearby stop added — Q4 appointments not moved");
   }
 
+  function addToTravelList(companyId: string) {
+    const c = liveCompanies.find((row) => row.id === companyId);
+    if (!c) {
+      flash("Company not in book");
+      return;
+    }
+    if (isOnTravelList(c)) {
+      flash(`${c.name} already on travel list`);
+      setTravelQuery("");
+      setTodayMode("car");
+      setTab("today");
+      return;
+    }
+    const date = todayIso();
+    setCompanies((prev) => addStopToDayPlan(prev, companyId, date));
+    setTravelQuery("");
+    setTodayMode("car");
+    setTab("today");
+    flash(`${c.name} · ${companyTypeLabel(c)} added to travel list`);
+  }
+
+  const travelMatches = useMemo(
+    () => searchBookCompanies(liveCompanies, travelQuery, 8),
+    [liveCompanies, travelQuery],
+  );
+
   async function buildDossierFor(c: Company, enrich: boolean) {
     setDossierBusy(c.id);
     try {
@@ -1874,6 +1904,55 @@ export default function App() {
             Car
           </button>
         </div>
+        <div className="panel travel-add">
+          <h2 style={{ marginTop: 0, marginBottom: "0.35rem", fontSize: "1rem" }}>Add to travel list</h2>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Type a company — recognized from your book with type — then add to the Car loop.
+          </p>
+          <div className="search" style={{ marginBottom: travelMatches.length ? "0.35rem" : "0" }}>
+            <span className="subtle">⌕</span>
+            <input
+              placeholder="Type company name…"
+              value={travelQuery}
+              onChange={(e) => setTravelQuery(e.target.value)}
+              aria-label="Find company for travel list"
+              autoComplete="off"
+            />
+          </div>
+          {travelQuery.trim() && !travelMatches.length && (
+            <p className="empty" style={{ margin: "0.35rem 0 0" }}>
+              No book match. Search Accounts or Sync Drop first — never invent a company.
+            </p>
+          )}
+          {!!travelMatches.length && (
+            <div className="travel-match-list" role="listbox" aria-label="Recognized companies">
+              {travelMatches.map((c) => {
+                const onList = isOnTravelList(c);
+                return (
+                  <div key={c.id} className="travel-match" role="option" aria-selected={false}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <strong>{c.name}</strong>
+                      <div className="muted">
+                        <span className="chip" style={{ marginRight: "0.35rem" }}>
+                          {companyTypeLabel(c)}
+                        </span>
+                        {[c.city, c.contactName].filter(Boolean).join(" · ") || "In book"}
+                        {onList ? " · already on list" : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={onList ? "btn btn-ghost" : "btn btn-primary"}
+                      onClick={() => addToTravelList(c.id)}
+                    >
+                      {onList ? "Open Car" : "Add stop"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div className="day-progress" aria-label="Daily progress">
           <span>
             <strong className="mono">{toDialCount}</strong> to dial
@@ -2135,8 +2214,8 @@ export default function App() {
               <p className="subtle">From {OFFICE.address}</p>
               {!routeStops.length && (
                 <p className="empty">
-                  No drive stops yet. Sync Sales Planner visits or add addresses on Today accounts — same
-                  ranked list as Office.
+                  No drive stops yet. Type a company above in <strong>Add to travel list</strong>, or sync
+                  Sales Planner visits — same ranked list as Office.
                 </p>
               )}
             </div>
@@ -2716,6 +2795,12 @@ export default function App() {
               <div className="stack">
                 <button className="btn btn-primary" onClick={() => dial(c)}>
                   Call
+                </button>
+                <button
+                  className="btn btn-accent"
+                  onClick={() => addToTravelList(c.id)}
+                >
+                  {isOnTravelList(c) ? "On travel" : "Add travel"}
                 </button>
                 <button
                   className="btn btn-ghost"

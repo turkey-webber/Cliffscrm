@@ -66,6 +66,55 @@ export function matchCompany(book: Company[], name: string): Company | undefined
   });
 }
 
+/** Primary CRM type badge for recognition UI (not industry taxonomy). */
+export function companyTypeLabel(c: Company): string {
+  if (c.badges.includes("jackpot")) return "Jackpot";
+  if (c.badges.includes("active")) return "Active";
+  if (c.badges.includes("prospect")) return "Prospect";
+  if (c.badges.includes("missing")) return "Missing client";
+  if (c.badges.includes("first-year")) return "First-year";
+  if (c.inBook || c.fromContactSummary) return "In book";
+  return "Company";
+}
+
+/**
+ * Type-as-you-go book recognition for travel list / Accounts.
+ * Exact name match first, then prefix, then substring; city/contact also match.
+ */
+export function searchBookCompanies(book: Company[], query: string, limit = 8): Company[] {
+  const raw = query.trim().toLowerCase();
+  if (raw.length < 1) return [];
+  const key = normalizeCompanyName(query);
+  const scored = book
+    .map((c) => {
+      const n = normalizeCompanyName(c.name);
+      const nameLc = c.name.toLowerCase();
+      const cityLc = c.city.toLowerCase();
+      const contactLc = c.contactName.toLowerCase();
+      let score = 0;
+      if (n === key || nameLc === raw) score = 100;
+      else if (n.startsWith(key) || nameLc.startsWith(raw)) score = 80;
+      else if (n.includes(key) || nameLc.includes(raw)) score = 60;
+      else if (cityLc.includes(raw) || contactLc.includes(raw)) score = 40;
+      else return null;
+      if (c.inBook || c.fromContactSummary) score += 5;
+      if (c.plannerOrder != null) score += 2;
+      return { c, score };
+    })
+    .filter((row): row is { c: Company; score: number } => !!row)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        (a.c.plannerOrder ?? 9999) - (b.c.plannerOrder ?? 9999) ||
+        a.c.name.localeCompare(b.c.name),
+    );
+  return scored.slice(0, limit).map((row) => row.c);
+}
+
+export function isOnTravelList(c: Company): boolean {
+  return c.plannerOrder != null;
+}
+
 export type Points = {
   discovery: number;
   order: number;
