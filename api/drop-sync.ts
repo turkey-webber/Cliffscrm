@@ -230,6 +230,9 @@ function olderDuplicateIds(files: DriveFile[]): string[] {
 }
 
 export async function GET(request: Request) {
+  const viewer = await requireViewer(request);
+  if (viewer instanceof Response) return viewer;
+
   const token = process.env.GOOGLE_DRIVE_ACCESS_TOKEN;
   if (!token) {
     return json({
@@ -238,9 +241,6 @@ export async function GET(request: Request) {
       files: [],
     });
   }
-
-  const viewer = await requireViewer(request);
-  if (viewer instanceof Response) return viewer;
 
   try {
     const folderId = await resolveFolderId(token);
@@ -266,6 +266,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const viewer = await requireViewer(request);
+  if (viewer instanceof Response) return viewer;
+
   const token = process.env.GOOGLE_DRIVE_ACCESS_TOKEN;
   if (!token) {
     return json({
@@ -274,9 +277,6 @@ export async function POST(request: Request) {
       files: [],
     });
   }
-
-  const viewer = await requireViewer(request);
-  if (viewer instanceof Response) return viewer;
 
   let body: { action?: string } = {};
   try {
