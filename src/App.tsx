@@ -371,12 +371,12 @@ function WrapUpSheet({
 }) {
   const err = wrapUpValid(draft);
   return (
-    <div className="sheet-overlay" role="dialog" aria-label="Edit scheduled contact">
+    <div className="sheet-overlay" role="dialog" aria-label="Call wrap-up">
       <div className="sheet-card wrap-sheet">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
             <p className="subtle" style={{ margin: 0 }}>
-              Edit scheduled contact
+              Call wrap-up
             </p>
             <h2 style={{ margin: "0.2rem 0 0" }}>{draft.companyName}</h2>
           </div>
@@ -855,15 +855,11 @@ export default function App() {
   const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
   const q4Pending = dayWraps.filter((w) => !w.doneInQ4).length;
   const dayLead = nextList[0] ?? null;
-  const hotCount = useMemo(() => buildHotSheet(liveCompanies).length, [liveCompanies]);
-  const goneCount = useMemo(() => buildGoneQuiet(liveCompanies).length, [liveCompanies]);
+  const hotSheet = useMemo(() => buildHotSheet(liveCompanies), [liveCompanies]);
+  const goneQuiet = useMemo(() => buildGoneQuiet(liveCompanies), [liveCompanies]);
+  const hotCount = hotSheet.length;
+  const goneCount = goneQuiet.length;
   const carLead = routeStops[0] ?? dayLead?.company ?? null;
-  const showDayBar =
-    tab === "today" &&
-    !wrapDraft &&
-    !captureOpen &&
-    !scriptOpen &&
-    (todayMode === "car" ? !!carLead : !!dayLead);
 
   const allScoutJobs = useMemo(
     () => mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds()),
@@ -895,19 +891,50 @@ export default function App() {
   );
   const researchFeed = useMemo(() => recentResearchFeed(liveCompanies, 10), [liveCompanies]);
 
+  const filteredNextList = useMemo(() => {
+    const hotIds = new Set(hotSheet.map((r) => r.company.id));
+    const quietIds = new Set(goneQuiet.map((r) => r.company.id));
+    const leadIds = new Set(jobOrderLeads.map((r) => r.company.id));
+    const scoutNames = new Set(scoutTen.map((j) => j.company.toLowerCase()));
+    return nextList.filter((n) => {
+      if (todayFilter === "all") return true;
+      if (todayFilter === "hot") return hotIds.has(n.company.id);
+      if (todayFilter === "quiet") return quietIds.has(n.company.id);
+      if (todayFilter === "leads") return leadIds.has(n.company.id);
+      if (todayFilter === "plan") return n.company.plannerOrder != null;
+      if (todayFilter === "scout") {
+        return (
+          scoutNames.has(n.company.name.toLowerCase()) ||
+          n.company.id.startsWith("territory-") ||
+          n.company.research.some((r) => /scout|hiring|job|posting/i.test(`${r.source} ${r.fact}`))
+        );
+      }
+      if (todayFilter === "q4") return wrapUps.some((w) => w.companyId === n.company.id && !w.doneInQ4);
+      return true;
+    });
+  }, [nextList, todayFilter, hotSheet, goneQuiet, jobOrderLeads, scoutTen, wrapUps]);
+  const viewLead = filteredNextList[0] ?? null;
+  const showDayBar =
+    tab === "today" &&
+    !wrapDraft &&
+    !editDraft &&
+    !captureOpen &&
+    !scriptOpen &&
+    (todayMode === "car" ? !!carLead : !!viewLead);
+
   const carStopId = routeStops[0]?.id;
   useEffect(() => {
     if (todayMode !== "car" || !carStopId) return;
     setActiveId(carStopId);
   }, [todayMode, carStopId]);
 
-  const dayLeadId = dayLead?.company.id;
-  const dayLeadNotes = dayLead?.company.notes;
-  const dayLeadResearchLen = dayLead?.company.research?.length;
-  const dayLeadTimelineLen = dayLead?.company.timeline?.length;
+  const viewLeadId = viewLead?.company.id;
+  const viewLeadNotes = viewLead?.company.notes;
+  const viewLeadResearchLen = viewLead?.company.research?.length;
+  const viewLeadTimelineLen = viewLead?.company.timeline?.length;
   useEffect(() => {
     if (todayMode !== "desk") return;
-    const c = dayLead?.company;
+    const c = viewLead?.company;
     if (!c) {
       setDialSuggestions(null);
       return;
@@ -926,8 +953,8 @@ export default function App() {
       cancelled = true;
     };
     // Intentionally keyed on stable company fields — not the whole company object.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayLead company snapshot
-  }, [todayMode, dayLeadId, dayLeadNotes, dayLeadResearchLen, dayLeadTimelineLen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- viewLead company snapshot
+  }, [todayMode, viewLeadId, viewLeadNotes, viewLeadResearchLen, viewLeadTimelineLen]);
 
   const csFile = recall.files.find((f) => f.role === "contact_summary" && f.kept);
   const plannerFile = recall.files.find((f) => f.role === "sales_planner" && f.kept);
@@ -1294,8 +1321,8 @@ export default function App() {
     }
   }
 
-  function applyResult(result: CallResult) {
-    const current = liveCompanies.find((c) => c.id === activeId);
+  function applyResult(result: CallResult, target?: Company) {
+    const current = target || liveCompanies.find((c) => c.id === activeId);
     if (!current) return;
     if (current.blitzState === "dnc") {
       flash("Do not call — admin only");
@@ -1440,6 +1467,20 @@ export default function App() {
       contactTitle: c.contactTitle || "",
       address: c.address || "",
     });
+  }
+
+  function closeContactEdit() {
+    const id = editDraft?.id;
+    setEditDraft(null);
+    if (id) {
+      setCompanies((prev) =>
+        prev.map((c) =>
+          c.id === id && c.blitzState === "locked"
+            ? { ...c, blitzState: "open" as const, lockedBy: undefined, lockUntil: undefined }
+            : c,
+        ),
+      );
+    }
   }
 
   function saveContactEdit() {
@@ -1865,7 +1906,13 @@ export default function App() {
   let main: ReactNode = null;
 
   if (tab === "home") {
-    const nextCompany = dayLead?.company ?? null;
+    const nextCompany = (todayMode === "car" ? carLead : dayLead?.company) ?? null;
+    const nextWhy =
+      todayMode === "car"
+        ? carLead
+          ? "Next stop on travel list"
+          : ""
+        : dayLead?.why || "";
     main = (
       <>
         <div className="home-hero">
@@ -1879,7 +1926,7 @@ export default function App() {
             <p className="home-next-label">Next up · {todayMode === "car" ? "Car" : "Office"}</p>
             <h2>{nextCompany.name}</h2>
             <p>
-              {dayLead?.why || companyTypeLabel(nextCompany)}
+              {nextWhy || companyTypeLabel(nextCompany)}
               {nextCompany.contactName ? ` · ${nextCompany.contactName}` : ""}
               {nextCompany.phone ? ` · ${nextCompany.phone}` : " · No phone on file"}
             </p>
@@ -2038,27 +2085,22 @@ export default function App() {
       </>
     );
   } else if (tab === "today") {
-    const hotIds = new Set(buildHotSheet(liveCompanies).map((r) => r.company.id));
-    const quietIds = new Set(buildGoneQuiet(liveCompanies).map((r) => r.company.id));
-    const leadIds = new Set(jobOrderLeads.map((r) => r.company.id));
-    const scoutNames = new Set(scoutTen.map((j) => j.company.toLowerCase()));
-    const deskItems = nextList.filter((n) => {
-      if (todayFilter === "all") return true;
-      if (todayFilter === "hot") return hotIds.has(n.company.id);
-      if (todayFilter === "quiet") return quietIds.has(n.company.id);
-      if (todayFilter === "leads") return leadIds.has(n.company.id);
-      if (todayFilter === "plan") return n.company.plannerOrder != null;
-      if (todayFilter === "scout") {
-        return (
-          scoutNames.has(n.company.name.toLowerCase()) ||
+    const deskItems = filteredNextList;
+    const lead = viewLead;
+    const filterCounts = {
+      all: nextList.length,
+      hot: nextList.filter((n) => hotSheet.some((h) => h.company.id === n.company.id)).length,
+      quiet: nextList.filter((n) => goneQuiet.some((h) => h.company.id === n.company.id)).length,
+      leads: nextList.filter((n) => jobOrderLeads.some((h) => h.company.id === n.company.id)).length,
+      plan: nextList.filter((n) => n.company.plannerOrder != null).length,
+      scout: nextList.filter(
+        (n) =>
+          scoutTen.some((j) => j.company.toLowerCase() === n.company.name.toLowerCase()) ||
           n.company.id.startsWith("territory-") ||
-          n.company.research.some((r) => /scout|hiring|job|posting/i.test(`${r.source} ${r.fact}`))
-        );
-      }
-      if (todayFilter === "q4") return wrapUps.some((w) => w.companyId === n.company.id && !w.doneInQ4);
-      return true;
-    });
-    const lead = deskItems[0] ?? nextList[0];
+          n.company.research.some((r) => /scout|hiring|job|posting/i.test(`${r.source} ${r.fact}`)),
+      ).length,
+      q4: nextList.filter((n) => wrapUps.some((w) => w.companyId === n.company.id && !w.doneInQ4)).length,
+    } as const;
     main = (
       <>
         <div className="section-head">
@@ -2074,13 +2116,13 @@ export default function App() {
         <div className="filter-rail" role="toolbar" aria-label="Today filters">
           {(
             [
-              ["all", "All", nextList.length],
-              ["hot", "Hot", hotCount],
-              ["quiet", "Quiet", goneCount],
-              ["leads", "Leads", jobOrderLeads.length],
-              ["plan", "Plan", nextList.filter((n) => n.company.plannerOrder != null).length],
-              ["scout", "Scout", scoutTen.length],
-              ["q4", "Q4", q4Pending],
+              ["all", "All", filterCounts.all],
+              ["hot", "Hot", filterCounts.hot],
+              ["quiet", "Quiet", filterCounts.quiet],
+              ["leads", "Leads", filterCounts.leads],
+              ["plan", "Plan", filterCounts.plan],
+              ["scout", "Scout", filterCounts.scout],
+              ["q4", "Q4", filterCounts.q4],
             ] as const
           ).map(([id, label, count]) => (
             <button
@@ -2247,7 +2289,7 @@ export default function App() {
                   onClick={() => {
                     setActiveId(lead.company.id);
                     claim(lead.company.id);
-                    applyResult("appointment");
+                    applyResult("appointment", lead.company);
                   }}
                 >
                   Appointment
@@ -2294,7 +2336,9 @@ export default function App() {
                   {suggestBusy ? "Refreshing…" : dialSuggestions?.provider === "grok" ? "Grok + app" : "App"}
                 </span>
               </div>
-                  {(dialSuggestions || suggestFor(lead.company)).blocks
+                  {((dialSuggestions && viewLeadId === lead.company.id
+                    ? dialSuggestions
+                    : suggestFor(lead.company))).blocks
                 .filter((b) => b.id === "opener" || b.id === "why" || b.id === "ask" || b.id === "desk")
                 .map((b) => {
                   const dossierOpener =
@@ -2321,7 +2365,9 @@ export default function App() {
                 })}
               <details className="suggest-objections">
                 <summary>Objections</summary>
-                {(dialSuggestions || suggestFor(lead.company)).objections.map((o) => (
+                {((dialSuggestions && viewLeadId === lead.company.id
+                  ? dialSuggestions
+                  : suggestFor(lead.company))).objections.map((o) => (
                   <div key={o.label} className="suggest-block">
                     <strong>{o.label}</strong>
                     <p className="muted">{o.reply}</p>
@@ -2423,7 +2469,9 @@ export default function App() {
           <div className="panel">
             <h2>Up next</h2>
             {!deskItems.length && (
-              <p className="empty">{liveCompanies.length ? "Queue clear" : "Sync Drop to fill Today."}</p>
+              <p className="empty">
+                {liveCompanies.length ? "Queue clear" : "Load starter desk or import Contact Summary."}
+              </p>
             )}
             {deskItems.slice(lead ? 1 : 0, 25).map((item) => (
               <button
@@ -5067,7 +5115,7 @@ export default function App() {
               : todayMode === "car" && carLead
                 ? `Car · ${carLead.name}`
                 : dayLead
-                  ? `Next · ${dayLead.company.name}`
+                  ? `Next · ${(viewLead || dayLead)!.company.name}`
                   : "Today desk";
 
   return (
@@ -5088,7 +5136,8 @@ export default function App() {
           onClick={() => {
             setTab("today");
             setTodayMode("desk");
-            if (dayLead?.company.phone) dial(dayLead.company);
+            const pill = viewLead || dayLead;
+            if (pill?.company.phone) dial(pill.company);
           }}
         >
           <strong className="mono">{toDialCount}</strong>
@@ -5098,7 +5147,7 @@ export default function App() {
 
       <main className="main">{main}</main>
 
-      {showDayBar && (todayMode === "car" ? carLead : dayLead) ? (
+      {showDayBar && (todayMode === "car" ? carLead : viewLead) ? (
         <div
           className="day-action-bar"
           role="toolbar"
@@ -5151,14 +5200,14 @@ export default function App() {
                 Skip
               </button>
             </>
-          ) : dayLead ? (
+          ) : viewLead ? (
             <>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
-                  setActiveId(dayLead.company.id);
-                  dial(dayLead.company);
+                  setActiveId(viewLead.company.id);
+                  dial(viewLead.company);
                 }}
               >
                 Call
@@ -5167,9 +5216,9 @@ export default function App() {
                 type="button"
                 className="btn btn-accent"
                 onClick={() => {
-                  setActiveId(dayLead.company.id);
-                  claim(dayLead.company.id);
-                  applyResult("appointment");
+                  setActiveId(viewLead.company.id);
+                  claim(viewLead.company.id);
+                  applyResult("appointment", viewLead.company);
                 }}
               >
                 Appt
@@ -5178,10 +5227,10 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setActiveId(dayLead.company.id);
-                  claim(dayLead.company.id);
+                  setActiveId(viewLead.company.id);
+                  claim(viewLead.company.id);
                   pendingScore.current = { result: "voicemail", points: 0 };
-                  openWrap(dayLead.company, "voicemail");
+                  openWrap(viewLead.company, "voicemail");
                 }}
               >
                 VM
@@ -5190,10 +5239,10 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setActiveId(dayLead.company.id);
-                  claim(dayLead.company.id);
+                  setActiveId(viewLead.company.id);
+                  claim(viewLead.company.id);
                   pendingScore.current = null;
-                  openWrap(dayLead.company, "skip");
+                  openWrap(viewLead.company, "skip");
                 }}
               >
                 Skip
@@ -5202,8 +5251,8 @@ export default function App() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setActiveId(dayLead.company.id);
-                  openWrap(dayLead.company, "got_them");
+                  setActiveId(viewLead.company.id);
+                  openWrap(viewLead.company, "got_them");
                 }}
               >
                 Wrap
@@ -5428,7 +5477,7 @@ export default function App() {
                   {liveCompanies.find((c) => c.id === editDraft.id)?.name || "Company"}
                 </h2>
               </div>
-              <button className="btn btn-ghost" onClick={() => setEditDraft(null)}>
+              <button className="btn btn-ghost" onClick={() => closeContactEdit()}>
                 Close
               </button>
             </div>
@@ -5468,7 +5517,7 @@ export default function App() {
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => saveContactEdit()}>
                 Save contact
               </button>
-              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditDraft(null)}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => closeContactEdit()}>
                 Cancel
               </button>
             </div>
