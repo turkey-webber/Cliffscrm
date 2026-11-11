@@ -149,6 +149,9 @@ button.dial-pill {
   font-size: 0.78rem;
   font-weight: 650;
   color: var(--ink);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 .day-chip .count {
   color: var(--call);
@@ -723,6 +726,13 @@ textarea { min-height: 6.5rem; resize: vertical; }
   padding: 0.95rem 0;
   border-bottom: 1px solid var(--line);
   font-weight: 650;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  cursor: pointer;
   font-size: 1.05rem;
 }
 .menu-link span { color: var(--subtle); font-size: 0.9rem; font-weight: 500; }
