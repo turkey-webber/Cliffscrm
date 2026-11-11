@@ -122,6 +122,9 @@ type MorePane =
   | "daily"
   | "scout"
   | "research";
+
+/** Live Territory Directory (separate app) — map, near-me, verified dossiers */
+const TERRITORY_DIRECTORY_URL = "https://territory-directory.apps.grok.bot";
 type ScoutPane = "brief" | "leads" | "today10" | "jobs" | "prospect" | "plan" | "contacts" | "briefing";
 type TodayMode = "desk" | "car";
 
@@ -1683,6 +1686,15 @@ export default function App() {
           >
             Scout{scoutTen.length ? <span className="count">{scoutTen.length}</span> : null}
           </button>
+          <a
+            className="day-chip"
+            href={TERRITORY_DIRECTORY_URL}
+            target="_blank"
+            rel="noreferrer"
+            title="Open Territory Directory"
+          >
+            Directory
+          </a>
           {q4Pending > 0 ? (
             <button type="button" className="day-chip" onClick={() => setTab("q4")}>
               Q4<span className="count">{q4Pending}</span>
@@ -4094,6 +4106,14 @@ export default function App() {
           >
             Scout Desk <span>→</span>
           </button>
+          <a
+            className="menu-link"
+            href={TERRITORY_DIRECTORY_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Territory Directory <span>↗</span>
+          </a>
           <button className="menu-link" onClick={() => setMorePane("research")}>
             Research book <span>→</span>
           </button>
