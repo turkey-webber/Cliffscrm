@@ -4877,7 +4877,11 @@ export default function App() {
           : tab === "q4"
             ? "Q4 wrap"
             : tab === "more"
-              ? "Tools & settings"
+              ? morePane === "scout"
+                ? scoutPane === "briefing"
+                  ? "Scout briefing console"
+                  : "Scout desk"
+                : "Tools & settings"
               : todayMode === "car" && carLead
                 ? `Car · ${carLead.name}`
                 : dayLead
