@@ -145,6 +145,7 @@ type MorePane =
   | "priority"
   | "lists"
   | "dock"
+  | "gallery"
   | "daily"
   | "scout"
   | "research";
@@ -4499,6 +4500,30 @@ export default function App() {
         </div>
       </>
     );
+  } else if (morePane === "gallery") {
+    const base = import.meta.env.BASE_URL || "/";
+    const galleryBase = `${base.endsWith("/") ? base : `${base}/`}design-gallery/`;
+    main = (
+      <>
+        <button className="btn btn-ghost" onClick={() => setMorePane("home")}>
+          ← More
+        </button>
+        <div className="section-head">
+          <h1>Design gallery</h1>
+          <p>36 futuristic comps · Decide tab has the recommended stack · discussion only</p>
+        </div>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <iframe
+            title="CliffsCRM design gallery"
+            src={galleryBase}
+            style={{ display: "block", width: "100%", height: "min(78vh, 52rem)", border: 0, background: "#050a08" }}
+          />
+        </div>
+        <a className="btn btn-primary btn-block" href={galleryBase} target="_blank" rel="noreferrer">
+          Open gallery full screen
+        </a>
+      </>
+    );
   } else {
     main = (
       <>
@@ -4547,6 +4572,9 @@ export default function App() {
             Blitz assign <span>→</span>
           </button>
           <p className="menu-group-label">System</p>
+          <button className="menu-link" onClick={() => setMorePane("gallery")}>
+            Design gallery (36 comps) <span>→</span>
+          </button>
           <button className="menu-link" onClick={() => setMorePane("settings")}>
             Settings <span>→</span>
           </button>
