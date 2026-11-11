@@ -1,9 +1,12 @@
+import { autoCropResumeImage } from "./cropResume";
 import { looksLikeResumeText } from "./detect";
 
 export type ParsedResume = {
   text: string;
   method: "text" | "docx" | "pdf" | "ocr" | "empty";
   warning?: string;
+  /** True when the image was auto-cropped before OCR */
+  cropped?: boolean;
 };
 
 async function parsePdf(buf: ArrayBuffer): Promise<string> {
@@ -67,10 +70,13 @@ export async function parseResumeFromFile(file: File | Blob, fileName = "resume"
 
   if (type.startsWith("image/") || /\.(jpe?g|png|webp|heic|gif)$/i.test(name)) {
     try {
-      const text = await ocrImage(file);
+      const cropped = await autoCropResumeImage(file);
+      const didCrop = cropped !== file;
+      const text = await ocrImage(cropped);
       return {
         text,
         method: "ocr",
+        cropped: didCrop,
         warning: text.length < 40 ? "OCR found little text — retake in better light" : undefined,
       };
     } catch (e) {

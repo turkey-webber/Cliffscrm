@@ -1,5 +1,5 @@
 import { isDemoCompany, type Company, type Dialer } from "./data";
-import type { MpcCandidate } from "./mpc";
+import { pruneExpiredMpc, type MpcCandidate } from "./mpc";
 import { DEFAULT_NEWSLETTER_PREFS, type NewsletterPrefs } from "./newsletter";
 import { DEFAULT_SCOUT_PREFS, type ScoutJob, type ScoutPrefs } from "./scout";
 import { DEFAULT_DOCK, normalizeDock, type DockId } from "./shell";
@@ -69,7 +69,7 @@ export function loadState(): Persisted {
       companies,
       wrapUps: Array.isArray(parsed.wrapUps) ? parsed.wrapUps : [],
       captures: Array.isArray(parsed.captures) ? parsed.captures : [],
-      mpc: Array.isArray(parsed.mpc) ? parsed.mpc : [],
+      mpc: pruneExpiredMpc(Array.isArray(parsed.mpc) ? (parsed.mpc as MpcCandidate[]) : []),
       todayMode:
         parsed.todayMode === "car" || (parsed.todayMode as string) === "truck" ? "car" : "desk",
       autoDialNext: parsed.autoDialNext !== false,
