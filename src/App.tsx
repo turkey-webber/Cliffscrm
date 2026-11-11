@@ -851,7 +851,6 @@ export default function App() {
   const toDialCount = dialList.length;
   const routeStops = useMemo(() => buildRouteStops(nextList, 8), [nextList]);
   const inbox = captures.filter((c) => c.status === "inbox");
-  const staleInbox = inbox.filter((c) => now - c.createdAt > 24 * 60 * 60 * 1000);
   const dayWraps = wrapUps.filter((w) => w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day);
   const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
   const q4Pending = dayWraps.filter((w) => !w.doneInQ4).length;
