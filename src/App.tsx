@@ -520,10 +520,10 @@ function WrapUpSheet({
           {err && <p className="subtle" style={{ margin: "0 0 0.45rem" }}>{err}</p>}
           <div className="row">
             <button className="btn btn-primary btn-lg" style={{ flex: 1 }} disabled={!!err} onClick={onSaveNext}>
-              Save &amp; next
+              {draft.outcome === "skip" ? "Skip & next" : "Save & next"}
             </button>
             <button className="btn btn-ghost btn-lg" style={{ flex: 1 }} disabled={!!err} onClick={onSaveStay}>
-              Save &amp; stay
+              {draft.outcome === "skip" ? "Skip & stay" : "Save & stay"}
             </button>
           </div>
         </div>
@@ -687,6 +687,7 @@ export default function App() {
   const [morePane, setMorePane] = useState<MorePane>(openImprove ? "newsletter" : "home");
   const [dockOrder, setDockOrder] = useState<DockId[]>(() => normalizeDock(initial.dockOrder));
   const [todayFilter, setTodayFilter] = useState<TodayFilter>("all");
+  const [deskQuery, setDeskQuery] = useState("");
   const [mpcFilter, setMpcFilter] = useState<MpcFilter>("all");
   const [listsFilter, setListsFilter] = useState<ListsFilter>("hot");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
@@ -913,7 +914,24 @@ export default function App() {
       return true;
     });
   }, [nextList, todayFilter, hotSheet, goneQuiet, jobOrderLeads, scoutTen, wrapUps]);
-  const viewLead = filteredNextList[0] ?? null;
+  const searchedNextList = useMemo(() => {
+    const q = deskQuery.trim().toLowerCase();
+    if (!q) return filteredNextList;
+    return filteredNextList.filter((n) => {
+      const c = n.company;
+      return (
+        c.name.toLowerCase().includes(q) ||
+        c.city.toLowerCase().includes(q) ||
+        c.contactName.toLowerCase().includes(q) ||
+        c.contactTitle.toLowerCase().includes(q) ||
+        (c.phone || "").toLowerCase().includes(q) ||
+        n.why.toLowerCase().includes(q) ||
+        n.motion.toLowerCase().includes(q)
+      );
+    });
+  }, [filteredNextList, deskQuery]);
+  const viewLead =
+    searchedNextList.find((n) => n.company.id === activeId) ?? searchedNextList[0] ?? null;
   const showDayBar =
     tab === "today" &&
     !wrapDraft &&
@@ -927,6 +945,14 @@ export default function App() {
     if (todayMode !== "car" || !carStopId) return;
     setActiveId(carStopId);
   }, [todayMode, carStopId]);
+
+  // Keep sticky actions / dial target aligned when search or filters drop the prior pick.
+  const syncedDeskLeadId = viewLead?.company.id;
+  useEffect(() => {
+    if (todayMode !== "desk" || tab !== "today") return;
+    if (!syncedDeskLeadId || syncedDeskLeadId === activeId) return;
+    setActiveId(syncedDeskLeadId);
+  }, [todayMode, tab, syncedDeskLeadId, activeId]);
 
   const viewLeadId = viewLead?.company.id;
   const viewLeadNotes = viewLead?.company.notes;
@@ -1321,6 +1347,49 @@ export default function App() {
     }
   }
 
+  function selectDeskLead(companyId: string) {
+    setActiveId(companyId);
+    setTodayMode("desk");
+    setTab("today");
+  }
+
+  /** Skip does not open wrap-up — no notes required; just move to the next scheduled call. */
+  function skipWithoutWrap(target?: Company) {
+    const current = target || liveCompanies.find((c) => c.id === activeId) || viewLead?.company;
+    if (!current) return;
+    pendingScore.current = null;
+    setWrapDraft(null);
+    setCompanies((prev) =>
+      prev.map((c) =>
+        c.id === current.id && c.blitzState === "locked"
+          ? { ...c, blitzState: "open" as const, lockedBy: undefined, lockUntil: undefined }
+          : c,
+      ),
+    );
+    if (todayMode === "car") {
+      const idx = routeStops.findIndex((c) => c.id === current.id);
+      const nxt =
+        (idx >= 0 ? routeStops[idx + 1] : null) || routeStops.find((c) => c.id !== current.id) || null;
+      if (nxt) {
+        setActiveId(nxt.id);
+        flash(`Skipped · next stop ${nxt.name}`);
+      } else {
+        flash("Skipped");
+      }
+      return;
+    }
+    const queue = searchedNextList.length ? searchedNextList : filteredNextList;
+    const idx = queue.findIndex((n) => n.company.id === current.id);
+    const nxt =
+      (idx >= 0 ? queue[idx + 1] : null) || queue.find((n) => n.company.id !== current.id) || null;
+    if (nxt) {
+      setActiveId(nxt.company.id);
+      flash(`Skipped · next ${nxt.company.name}`);
+    } else {
+      flash("Skipped");
+    }
+  }
+
   function applyResult(result: CallResult, target?: Company) {
     const current = target || liveCompanies.find((c) => c.id === activeId);
     if (!current) return;
@@ -1329,8 +1398,7 @@ export default function App() {
       return;
     }
     if (result === "skip") {
-      pendingScore.current = null;
-      openWrap(current, "skip");
+      skipWithoutWrap(current);
       return;
     }
     if (result === "voicemail") {
@@ -2085,7 +2153,7 @@ export default function App() {
       </>
     );
   } else if (tab === "today") {
-    const deskItems = filteredNextList;
+    const deskItems = searchedNextList;
     const lead = viewLead;
     const filterCounts = {
       all: nextList.length,
@@ -2107,12 +2175,34 @@ export default function App() {
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Dialer — call next, wrap, next. Goal = appointment."
+              ? "Search or scroll the scheduled list, pick who to call. Skip needs no notes. Goal = appointment."
               : "Car — navigate stops; Arrived logs the visit"}
             {` · ${deskItems.length} in view`}
+            {deskQuery.trim() && filteredNextList.length !== deskItems.length
+              ? ` of ${filteredNextList.length}`
+              : ""}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
         </div>
+        {todayMode === "desk" ? (
+          <div className="search desk-search">
+            <span className="subtle">⌕</span>
+            <input
+              placeholder="Search scheduled calls…"
+              value={deskQuery}
+              onChange={(e) => setDeskQuery(e.target.value)}
+              aria-label="Search scheduled calls"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            {deskQuery.trim() ? (
+              <button type="button" className="btn btn-ghost" style={{ padding: "0.2rem 0.45rem" }} onClick={() => setDeskQuery("")}>
+                Clear
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="filter-rail" role="toolbar" aria-label="Today filters">
           {(
             [
@@ -2214,7 +2304,50 @@ export default function App() {
             {q4Pending ? ` · ${q4Pending} Q4` : ""}
           </span>
         </div>
-        {!deskItems.length && (
+        {todayMode === "desk" && !!filteredNextList.length && (
+          <div className="panel schedule-panel">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+              <h2 style={{ margin: 0 }}>Scheduled calls</h2>
+              <span className="subtle">{deskItems.length} shown</span>
+            </div>
+            <p className="subtle" style={{ marginTop: "0.35rem" }}>
+              Tap a company to open it in the dialer — call who you prioritize.
+            </p>
+            {!deskItems.length ? (
+              <p className="empty">No matches — clear search or try All.</p>
+            ) : (
+              <div className="schedule-list" role="listbox" aria-label="Scheduled calls">
+                {deskItems.map((item) => {
+                  const selected = lead?.company.id === item.company.id;
+                  return (
+                    <button
+                      key={item.company.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      className={`list-item schedule-item${selected ? " selected" : ""}`}
+                      onClick={() => selectDeskLead(item.company.id)}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong>
+                          {item.motion.toUpperCase()} · {item.company.name}
+                        </strong>
+                        <div className="muted">
+                          {item.why}
+                          {item.company.phone ? ` · ${item.company.phone}` : " · No phone"}
+                          {item.company.contactName ? ` · ${item.company.contactName}` : ""}
+                        </div>
+                        <BadgeRow c={item.company} />
+                      </div>
+                      {selected ? <span className="chip">Selected</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {!filteredNextList.length && (
           <div className="demo-banner">
             {!liveCompanies.length
               ? "Empty desk — load Montgomery employers with phones on file, or import Contact Summary."
@@ -2269,9 +2402,9 @@ export default function App() {
           </div>
         )}
         {todayMode === "desk" && lead && (
-          <div className="dial-cockpit">
+          <div className="dial-cockpit" id="desk-dial-cockpit">
             <div className="hero-call">
-              <p className="eyebrow">Next call · {lead.motion}</p>
+              <p className="eyebrow">Selected · {lead.motion}</p>
               <h2>{lead.company.name}</h2>
               <p>
                 {lead.why}
@@ -2465,41 +2598,7 @@ export default function App() {
             ))}
           </div>
         )}
-        {todayMode === "desk" ? (
-          <div className="panel">
-            <h2>Up next</h2>
-            {!deskItems.length && (
-              <p className="empty">
-                {liveCompanies.length ? "Queue clear" : "Load starter desk or import Contact Summary."}
-              </p>
-            )}
-            {deskItems.slice(lead ? 1 : 0, 25).map((item) => (
-              <button
-                key={item.company.id}
-                type="button"
-                className="list-item"
-                style={{ width: "100%", textAlign: "left" }}
-                onClick={() => {
-                  setActiveId(item.company.id);
-                  if (item.company.phone) dial(item.company);
-                  else openWrap(item.company, "got_them");
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <strong>
-                    {item.motion.toUpperCase()} · {item.company.name}
-                  </strong>
-                  <div className="muted">
-                    {item.why}
-                    {item.company.phone ? ` · ${item.company.phone}` : " · No phone"}
-                    {item.company.contactName ? ` · ${item.company.contactName}` : ""}
-                  </div>
-                  <BadgeRow c={item.company} />
-                </div>
-              </button>
-            ))}
-          </div>
-        ) : (
+        {todayMode === "desk" ? null : (
           <div className="car-cockpit">
             <div className="panel">
               <h2>Car loop</h2>
@@ -5193,8 +5292,7 @@ export default function App() {
                 onClick={() => {
                   setActiveId(carLead.id);
                   claim(carLead.id);
-                  pendingScore.current = null;
-                  openWrap(carLead, "skip");
+                  skipWithoutWrap(carLead);
                 }}
               >
                 Skip
@@ -5241,8 +5339,7 @@ export default function App() {
                 onClick={() => {
                   setActiveId(viewLead.company.id);
                   claim(viewLead.company.id);
-                  pendingScore.current = null;
-                  openWrap(viewLead.company, "skip");
+                  skipWithoutWrap(viewLead.company);
                 }}
               >
                 Skip
