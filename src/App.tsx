@@ -64,7 +64,7 @@ import {
   supportsDirectoryPicker,
 } from "./mpc/localDrop";
 import { parseResumeFromBase64, parseResumeFromFile } from "./mpc/parseResume";
-import { loadState, saveState } from "./persist";
+import { exportBookJson, loadState, parseBookJson, saveState } from "./persist";
 import {
   callNoteFields,
   companyRecordFields,
@@ -375,13 +375,31 @@ function WrapUpSheet({
   onClose: () => void;
 }) {
   const err = wrapUpValid(draft);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  useEffect(() => {
+    notesRef.current?.focus();
+  }, []);
   return (
-    <div className="sheet-overlay" role="dialog" aria-label="Call wrap-up">
+    <div className="sheet-overlay" role="dialog" aria-label="Call wrap-up" aria-modal="true">
       <div className="sheet-card wrap-sheet">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
             <p className="subtle" style={{ margin: 0 }}>
-              Call wrap-up
+              {draft.outcome === "voicemail"
+                ? "Voicemail wrap"
+                : draft.outcome === "skip"
+                  ? "Skip"
+                  : "Call wrap-up"}
             </p>
             <h2 style={{ margin: "0.2rem 0 0" }}>{draft.companyName}</h2>
           </div>
@@ -397,6 +415,7 @@ function WrapUpSheet({
           />
           <label className="field-label">Other Results</label>
           <textarea
+            ref={notesRef}
             className="area"
             rows={3}
             value={draft.otherResults}
@@ -693,6 +712,12 @@ export default function App() {
   const [dockOrder, setDockOrder] = useState<DockId[]>(() => normalizeDock(initial.dockOrder));
   const [todayFilter, setTodayFilter] = useState<TodayFilter>("all");
   const [deskQuery, setDeskQuery] = useState("");
+  /** Session-only soft-defer after Skip — kept at end of Office queue until a real wrap. */
+  const [skippedIds, setSkippedIds] = useState<string[]>([]);
+  /** Car loop focus — Skip/Arrived advance this instead of always forcing stop 1. */
+  const [carFocusId, setCarFocusId] = useState<string | null>(null);
+  /** null = probing; true = Cursor/API host; false = static GitHub Pages (no /api). */
+  const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [mpcFilter, setMpcFilter] = useState<MpcFilter>("all");
   const [listsFilter, setListsFilter] = useState<ListsFilter>("hot");
   const [todayMode, setTodayMode] = useState<TodayMode>(initial.todayMode);
@@ -790,12 +815,15 @@ export default function App() {
         try {
           data = JSON.parse(raw) as typeof data;
         } catch {
-          return; // static host without API
+          if (!cancelled) setApiAvailable(false);
+          return; // static host without API (GitHub Pages)
         }
-        if (cancelled || !data.configured || !data.files?.length) return;
-        if (!cancelled) void onSyncDrive();
+        if (cancelled) return;
+        setApiAvailable(true);
+        if (!data.configured || !data.files?.length) return;
+        void onSyncDrive();
       } catch {
-        /* manual import remains */
+        if (!cancelled) setApiAvailable(false);
       }
     })();
     return () => {
@@ -839,7 +867,7 @@ export default function App() {
   // Persist raw companies (not lock-filtered live view). Debounce to cut localStorage thrash.
   useEffect(() => {
     const id = window.setTimeout(() => {
-      saveState({
+      const result = saveState({
         companies,
         myScore,
         callsDone,
@@ -858,6 +886,7 @@ export default function App() {
         scoutPrefs,
         dockOrder,
       });
+      if (!result.ok) flash(result.error);
     }, 400);
     return () => window.clearTimeout(id);
   }, [companies, myScore, callsDone, visitsDone, importLog, dialer, autoDialNext, wrapUps, captures, mpc, todayMode, newsletterPrefs, mpcSeenIds, mpcDropFolderName, scoutJobs, scoutPrefs, dockOrder]);
@@ -868,7 +897,10 @@ export default function App() {
   const toDialCount = dialList.length;
   const routeStops = useMemo(() => buildRouteStops(nextList, 8), [nextList]);
   const inbox = captures.filter((c) => c.status === "inbox");
-  const dayWraps = wrapUps.filter((w) => w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day);
+  const dayWraps = useMemo(() => {
+    const day = wrapUps.filter((w) => w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day);
+    return [...day].sort((a, b) => Number(a.doneInQ4) - Number(b.doneInQ4) || b.createdAt.localeCompare(a.createdAt));
+  }, [wrapUps, q4Day]);
   const doneCount = dayWraps.filter((w) => w.doneInQ4).length;
   const q4Pending = dayWraps.filter((w) => !w.doneInQ4).length;
   const dayLead = nextList[0] ?? null;
@@ -876,7 +908,12 @@ export default function App() {
   const goneQuiet = useMemo(() => buildGoneQuiet(liveCompanies), [liveCompanies]);
   const hotCount = hotSheet.length;
   const goneCount = goneQuiet.length;
-  const carLead = routeStops[0] ?? dayLead?.company ?? null;
+  const carLead =
+    (carFocusId ? routeStops.find((c) => c.id === carFocusId) : null) ??
+    routeStops[0] ??
+    dayLead?.company ??
+    null;
+  const carStopIndex = carLead ? Math.max(0, routeStops.findIndex((c) => c.id === carLead.id)) : 0;
 
   const allScoutJobs = useMemo(
     () => mergeScoutJobs(scoutJobs, jobsFromBookResearch(liveCompanies), jobsFromTerritorySeeds()),
@@ -913,7 +950,7 @@ export default function App() {
     const quietIds = new Set(goneQuiet.map((r) => r.company.id));
     const leadIds = new Set(jobOrderLeads.map((r) => r.company.id));
     const scoutNames = new Set(scoutTen.map((j) => j.company.toLowerCase()));
-    return nextList.filter((n) => {
+    const filtered = nextList.filter((n) => {
       if (todayFilter === "all") return true;
       if (todayFilter === "hot") return hotIds.has(n.company.id);
       if (todayFilter === "quiet") return quietIds.has(n.company.id);
@@ -929,7 +966,12 @@ export default function App() {
       if (todayFilter === "q4") return wrapUps.some((w) => w.companyId === n.company.id && !w.doneInQ4);
       return true;
     });
-  }, [nextList, todayFilter, hotSheet, goneQuiet, jobOrderLeads, scoutTen, wrapUps]);
+    if (!skippedIds.length) return filtered;
+    const deferred = new Set(skippedIds);
+    const front = filtered.filter((n) => !deferred.has(n.company.id));
+    const back = filtered.filter((n) => deferred.has(n.company.id));
+    return [...front, ...back];
+  }, [nextList, todayFilter, hotSheet, goneQuiet, jobOrderLeads, scoutTen, wrapUps, skippedIds]);
   const searchedNextList = useMemo(() => {
     const q = deskQuery.trim().toLowerCase();
     if (!q) return filteredNextList;
@@ -956,11 +998,21 @@ export default function App() {
     !scriptOpen &&
     (todayMode === "car" ? !!carLead : !!viewLead);
 
-  const carStopId = routeStops[0]?.id;
+  // Align Car sticky actions with focused stop; do not snap back to stop 1 after Skip.
   useEffect(() => {
-    if (todayMode !== "car" || !carStopId) return;
-    setActiveId(carStopId);
-  }, [todayMode, carStopId]);
+    if (todayMode !== "car") return;
+    if (!routeStops.length) {
+      setCarFocusId(null);
+      return;
+    }
+    if (carFocusId && routeStops.some((c) => c.id === carFocusId)) {
+      setActiveId(carFocusId);
+      return;
+    }
+    const firstId = routeStops[0].id;
+    setCarFocusId(firstId);
+    setActiveId(firstId);
+  }, [todayMode, routeStops, carFocusId]);
 
   // Keep sticky actions / dial target aligned when search or filters drop the prior pick.
   const syncedDeskLeadId = viewLead?.company.id;
@@ -1182,6 +1234,65 @@ export default function App() {
     setToast(msg);
   }
 
+  function exportDeskBook() {
+    const payload = {
+      companies,
+      myScore,
+      callsDone,
+      visitsDone,
+      importLog,
+      dialer,
+      autoDialNext,
+      wrapUps,
+      captures,
+      mpc,
+      todayMode,
+      newsletterPrefs,
+      mpcSeenIds,
+      mpcDropFolderName,
+      scoutJobs,
+      scoutPrefs,
+      dockOrder,
+    };
+    const blob = new Blob([exportBookJson(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cliffscrm-book-${todayIso()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    flash("Book JSON downloaded");
+  }
+
+  async function importDeskBook(file: File) {
+    try {
+      const text = await file.text();
+      const next = parseBookJson(text);
+      setCompanies(next.companies);
+      setWrapUps(next.wrapUps);
+      setCaptures(next.captures);
+      setMpc(next.mpc);
+      setMyScore(next.myScore);
+      setCallsDone(next.callsDone);
+      setVisitsDone(next.visitsDone);
+      setImportLog(next.importLog);
+      setDialer(next.dialer);
+      setAutoDialNext(next.autoDialNext !== false);
+      setTodayMode(next.todayMode);
+      setNewsletterPrefs(next.newsletterPrefs);
+      setMpcSeenIds(next.mpcSeenIds);
+      setMpcDropFolderName(next.mpcDropFolderName);
+      setScoutJobs(next.scoutJobs);
+      setScoutPrefs(next.scoutPrefs);
+      setDockOrder(normalizeDock(next.dockOrder));
+      setSkippedIds([]);
+      setCarFocusId(null);
+      flash(`Imported ${next.companies.length} companies`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Import failed");
+    }
+  }
+
   async function copyText(text: string, label: string) {
     try {
       if (navigator.clipboard?.writeText) {
@@ -1224,8 +1335,14 @@ export default function App() {
     setActiveId(companyId);
   }
 
-  function openWrap(c: Company, outcome: WrapOutcome, prefill = "") {
+  function openWrap(
+    c: Company,
+    outcome: WrapOutcome,
+    prefill = "",
+    extra: Partial<WrapUp> = {},
+  ) {
     const onSite = /\barrived\b|\bon[- ]?site\b|\bvisit\b/i.test(prefill);
+    const vm = outcome === "voicemail";
     setWrapDraft(
       blankWrapUp({
         companyId: c.id,
@@ -1234,9 +1351,12 @@ export default function App() {
         companyRep: c.contactName,
         futureRep: c.contactName,
         outcome,
-        leftMessage: outcome === "voicemail" ? "yes" : "",
-        otherResults: prefill,
+        leftMessage: vm ? "yes" : "",
+        otherResults: prefill || (vm ? "Left voicemail" : ""),
         callType: onSite ? "Other call - face to face" : "Other call - telephone",
+        futureGoals: vm ? ["Recruiting"] : [],
+        futureDate: addDaysIso(7),
+        ...extra,
       }),
     );
   }
@@ -1259,6 +1379,9 @@ export default function App() {
     };
     const nextWraps = [draft, ...wrapUps.filter((w) => w.id !== draft.id)];
     setWrapUps(nextWraps);
+    if (draft.outcome !== "skip") {
+      setSkippedIds((prev) => prev.filter((id) => id !== draft.companyId));
+    }
 
     let nextCompanies: Company[] = [];
     setCompanies((prev) => {
@@ -1340,17 +1463,33 @@ export default function App() {
     setWrapDraft(null);
     flash(draft.outcome === "capture" ? "Capture filed" : "Wrap-up saved");
     if (advance) {
+      if (todayMode === "car") {
+        const idx = routeStops.findIndex((c) => c.id === draft.companyId);
+        const nxtStop =
+          (idx >= 0 ? routeStops[idx + 1] : null) ||
+          routeStops.find((c) => c.id !== draft.companyId) ||
+          null;
+        if (nxtStop) {
+          setCarFocusId(nxtStop.id);
+          setActiveId(nxtStop.id);
+          setTab("today");
+          flash(`Next stop: ${nxtStop.name}`);
+        } else if (q4Pending > 0 || nextWraps.some((w) => !w.doneInQ4 && w.resultDate === todayIso())) {
+          flash("Loop clear — finish Q4 sheet");
+          setTab("q4");
+        } else {
+          flash("Loop clear");
+        }
+        return;
+      }
       const rebuilt = buildNextList(releaseExpiredLocks(nextCompanies, Date.now()), nextWraps);
       const nxt = rebuilt.find((n) => n.company.id !== draft.companyId) || rebuilt[0];
       if (nxt) {
         setActiveId(nxt.company.id);
         setTab("today");
-        // Stay in Car when driving the loop; Office keeps auto-dial.
-        if (todayMode !== "car") setTodayMode("desk");
-        if (todayMode !== "car" && autoDialNext && nxt.company.phone) {
+        setTodayMode("desk");
+        if (autoDialNext && nxt.company.phone) {
           window.setTimeout(() => dial(nxt.company), 280);
-        } else if (todayMode === "car") {
-          flash(`Next stop: ${nxt.company.name}`);
         } else if (!nxt.company.phone) {
           flash(`Next: ${nxt.company.name} — no phone`);
         } else {
@@ -1367,6 +1506,16 @@ export default function App() {
     setActiveId(companyId);
     setTodayMode("desk");
     setTab("today");
+    window.requestAnimationFrame(() => {
+      const esc =
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(companyId)
+          : companyId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      document
+        .querySelector(`[data-schedule-id="${esc}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      document.getElementById("desk-dial-cockpit")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
   }
 
   /** Skip does not open wrap-up — no notes required; just move to the next scheduled call. */
@@ -1387,6 +1536,7 @@ export default function App() {
       const nxt =
         (idx >= 0 ? routeStops[idx + 1] : null) || routeStops.find((c) => c.id !== current.id) || null;
       if (nxt) {
+        setCarFocusId(nxt.id);
         setActiveId(nxt.id);
         flash(`Skipped · next stop ${nxt.name}`);
       } else {
@@ -1394,10 +1544,14 @@ export default function App() {
       }
       return;
     }
+    setSkippedIds((prev) => (prev.includes(current.id) ? prev : [...prev, current.id]));
     const queue = searchedNextList.length ? searchedNextList : filteredNextList;
-    const idx = queue.findIndex((n) => n.company.id === current.id);
+    const withoutCurrent = queue.filter((n) => n.company.id !== current.id);
+    // Prefer next not-yet-skipped, else first remaining (skipped sit at end after re-order).
     const nxt =
-      (idx >= 0 ? queue[idx + 1] : null) || queue.find((n) => n.company.id !== current.id) || null;
+      withoutCurrent.find((n) => !skippedIds.includes(n.company.id) && n.company.id !== current.id) ||
+      withoutCurrent[0] ||
+      null;
     if (nxt) {
       setActiveId(nxt.company.id);
       flash(`Skipped · next ${nxt.company.name}`);
@@ -1425,7 +1579,12 @@ export default function App() {
     // Score only after wrap saves — keep pending until then.
     const points = scoreFor(result, current, DEFAULT_POINTS);
     pendingScore.current = { result, points };
-    openWrap(current, "got_them", resultLabel(result));
+    openWrap(
+      current,
+      "got_them",
+      resultLabel(result),
+      result === "appointment" ? { resultGoals: ["Appointment Set"] } : {},
+    );
   }
 
   function closeWrapSheet() {
@@ -2136,14 +2295,16 @@ export default function App() {
                 >
                   Load starter desk
                 </button>
-                <button
-                  className="btn btn-accent btn-block"
-                  style={{ marginTop: "0.45rem" }}
-                  disabled={!!importBusy}
-                  onClick={() => void onSyncDrive()}
-                >
-                  {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
-                </button>
+                {apiAvailable !== false ? (
+                  <button
+                    className="btn btn-accent btn-block"
+                    style={{ marginTop: "0.45rem" }}
+                    disabled={!!importBusy || apiAvailable === null}
+                    onClick={() => void onSyncDrive()}
+                  >
+                    {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+                  </button>
+                ) : null}
                 <button
                   className="btn btn-ghost btn-block"
                   style={{ marginTop: "0.45rem" }}
@@ -2413,6 +2574,7 @@ export default function App() {
                       type="button"
                       role="option"
                       aria-selected={selected}
+                      data-schedule-id={item.company.id}
                       className={`list-item schedule-item${selected ? " selected" : ""}`}
                       onClick={() => selectDeskLead(item.company.id)}
                     >
@@ -2451,14 +2613,21 @@ export default function App() {
                 >
                   Load starter desk
                 </button>
-                <button
-                  className="btn btn-accent btn-block"
-                  style={{ marginTop: "0.45rem" }}
-                  disabled={!!importBusy}
-                  onClick={() => void onSyncDrive()}
-                >
-                  {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
-                </button>
+                {apiAvailable !== false ? (
+                  <button
+                    className="btn btn-accent btn-block"
+                    style={{ marginTop: "0.45rem" }}
+                    disabled={!!importBusy || apiAvailable === null}
+                    onClick={() => void onSyncDrive()}
+                  >
+                    {importBusy === "drive" ? "Syncing…" : "Sync Drop"}
+                  </button>
+                ) : (
+                  <p className="subtle" style={{ marginTop: "0.55rem" }}>
+                    GitHub Pages can’t Sync Drop — use Load starter or Import files. Company URL stays
+                    turkey-webber.github.io/Cliffscrm.
+                  </p>
+                )}
                 <button
                   className="btn btn-ghost btn-block"
                   style={{ marginTop: "0.45rem" }}
@@ -2699,29 +2868,30 @@ export default function App() {
                 </p>
               )}
             </div>
-            {routeStops[0] && (
+            {carLead && (
               <div className="hero-call car-stop">
                 <p className="eyebrow">
-                  Stop 1 of {routeStops.length}
+                  Stop {carStopIndex + 1} of {routeStops.length}
                   {(() => {
-                    const mi = milesFromOffice(routeStops[0]);
+                    const mi = milesFromOffice(carLead);
                     return mi != null ? ` · ${mi} mi from office` : "";
                   })()}
                 </p>
-                <h2>{routeStops[0].name}</h2>
+                <h2>{carLead.name}</h2>
                 <p>
-                  {[routeStops[0].address, routeStops[0].city].filter(Boolean).join(", ") || "Address missing"}
-                  {routeStops[0].contactName ? ` · ${routeStops[0].contactName}` : ""}
+                  {[carLead.address, carLead.city].filter(Boolean).join(", ") || "Address missing"}
+                  {carLead.contactName ? ` · ${carLead.contactName}` : ""}
                 </p>
-                <p className="dial-phone mono">{routeStops[0].phone || "No phone on file"}</p>
+                <p className="dial-phone mono">{carLead.phone || "No phone on file"}</p>
                 <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
                   <button
                     type="button"
                     className="btn btn-primary btn-lg"
                     style={{ flex: 1, minWidth: "8rem" }}
                     onClick={() => {
-                      setActiveId(routeStops[0].id);
-                      openMapsNavigate(routeStops[0]);
+                      setActiveId(carLead.id);
+                      setCarFocusId(carLead.id);
+                      openMapsNavigate(carLead);
                     }}
                   >
                     Navigate
@@ -2730,33 +2900,35 @@ export default function App() {
                     type="button"
                     className="btn btn-accent"
                     onClick={() => {
-                      setActiveId(routeStops[0].id);
-                      claim(routeStops[0].id);
-                      openWrap(routeStops[0], "got_them", "Arrived on site — visit");
+                      setActiveId(carLead.id);
+                      setCarFocusId(carLead.id);
+                      claim(carLead.id);
+                      openWrap(carLead, "got_them", "Arrived on site — visit");
                     }}
                   >
                     Arrived
                   </button>
                 </div>
                 <div className="row wrap" style={{ marginTop: "0.5rem", gap: "0.45rem" }}>
-                  <a className="btn btn-ghost" href={appleMapsUrl(routeStops[0])} target="_blank" rel="noreferrer">
+                  <a className="btn btn-ghost" href={appleMapsUrl(carLead)} target="_blank" rel="noreferrer">
                     Apple Maps
                   </a>
                   <a
                     className="btn btn-ghost"
-                    href={googleMapsStopUrl(routeStops[0])}
+                    href={googleMapsStopUrl(carLead)}
                     target="_blank"
                     rel="noreferrer"
                   >
                     Google Maps
                   </a>
-                  {routeStops[0].phone ? (
+                  {carLead.phone ? (
                     <button
                       type="button"
                       className="btn btn-ghost"
                       onClick={() => {
-                        setActiveId(routeStops[0].id);
-                        dial(routeStops[0]);
+                        setActiveId(carLead.id);
+                        setCarFocusId(carLead.id);
+                        dial(carLead);
                       }}
                     >
                       Call ahead
@@ -2767,13 +2939,14 @@ export default function App() {
             )}
             {routeStops.length > 1 && (
               <div className="panel">
-                <h2>Up next on loop</h2>
-                {routeStops.slice(1).map((c, i) => {
-                  const prev = routeStops[i];
+                <h2>Loop stops</h2>
+                {routeStops.map((c, i) => {
+                  if (carLead && c.id === carLead.id) return null;
+                  const prev = i > 0 ? routeStops[i - 1] : null;
                   const mi = milesFromOffice(c);
                   return (
                     <div key={c.id} className="list-item">
-                      <strong className="mono">{i + 2}</strong>
+                      <strong className="mono">{i + 1}</strong>
                       <div style={{ flex: 1 }}>
                         <strong>{c.name}</strong>
                         <div className="muted">
@@ -2787,6 +2960,7 @@ export default function App() {
                             className="btn btn-ghost"
                             onClick={() => {
                               setActiveId(c.id);
+                              setCarFocusId(c.id);
                               openMapsNavigate(c, prev);
                             }}
                           >
@@ -2802,6 +2976,7 @@ export default function App() {
                           className="btn btn-primary"
                           onClick={() => {
                             setActiveId(c.id);
+                            setCarFocusId(c.id);
                             if (c.phone) dial(c);
                             else openWrap(c, "got_them");
                           }}
@@ -2812,6 +2987,7 @@ export default function App() {
                           className="btn btn-ghost"
                           onClick={() => {
                             setActiveId(c.id);
+                            setCarFocusId(c.id);
                             claim(c.id);
                             openWrap(c, "got_them", "Arrived on site — visit");
                           }}
@@ -3380,12 +3556,31 @@ export default function App() {
         <div className="section-head">
           <h1>Q4</h1>
           <p>
-            Close the day · {doneCount} of {dayWraps.length} wraps entered
+            Close the day · {doneCount} of {dayWraps.length} wraps entered · pending first
           </p>
         </div>
         <div className="card">
           <label className="field-label">Day</label>
           <input className="select" type="date" value={q4Day} onChange={(e) => setQ4Day(e.target.value)} />
+          {q4Pending > 0 ? (
+            <button
+              type="button"
+              className="btn btn-accent btn-block"
+              style={{ marginTop: "0.65rem" }}
+              onClick={() => {
+                setWrapUps((prev) =>
+                  prev.map((w) =>
+                    w.resultDate === q4Day || w.createdAt.slice(0, 10) === q4Day
+                      ? { ...w, doneInQ4: true }
+                      : w,
+                  ),
+                );
+                flash(`Marked ${q4Pending} done in Q4`);
+              }}
+            >
+              Mark remaining done ({q4Pending})
+            </button>
+          ) : null}
         </div>
         {!dayWraps.length && (
           <div className="demo-banner">
@@ -3419,6 +3614,13 @@ export default function App() {
                   Done in Q4
                 </label>
               </div>
+              <button
+                className="btn btn-primary btn-block"
+                style={{ marginTop: "0.55rem" }}
+                onClick={() => void copyText(copy.full, "Q4 Results + Future")}
+              >
+                Copy both
+              </button>
               <h3>Results</h3>
               <pre className="q4-block">{copy.results}</pre>
               <button className="btn btn-ghost btn-block" onClick={() => void copyText(copy.results, "Other Results block")}>
@@ -3875,9 +4077,20 @@ export default function App() {
           <h1>Import</h1>
           <p>Contact Summary = book · Sales Planner = Today queue</p>
         </div>
-        <button className="btn btn-primary btn-block btn-lg" disabled={!!importBusy} onClick={() => void onSyncDrive()}>
-          {importBusy === "drive" ? "Syncing…" : "Sync CliffMover / Grok Drop"}
-        </button>
+        {apiAvailable === false ? (
+          <div className="demo-banner" style={{ marginBottom: "0.65rem" }}>
+            Static host (GitHub Pages) — Drive Sync is unavailable here. Use Pick files, Load starter desk, or
+            Export/Import book JSON below.
+          </div>
+        ) : (
+          <button
+            className="btn btn-primary btn-block btn-lg"
+            disabled={!!importBusy || apiAvailable === null}
+            onClick={() => void onSyncDrive()}
+          >
+            {importBusy === "drive" ? "Syncing…" : "Sync CliffMover / Grok Drop"}
+          </button>
+        )}
         <label className="btn btn-accent btn-block btn-lg file-btn" style={{ marginTop: "0.55rem" }}>
           {importBusy === "manual" ? "Importing…" : "Pick files from Drop"}
           <input
@@ -3890,6 +4103,28 @@ export default function App() {
             }}
           />
         </label>
+        <div className="card" style={{ marginTop: "0.75rem" }}>
+          <h2 style={{ marginTop: 0 }}>Book backup</h2>
+          <p className="subtle">
+            Your book lives in this browser. Export JSON before clearing storage — restore on any device with
+            Import.
+          </p>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => exportDeskBook()}>
+            Export book JSON
+          </button>
+          <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.45rem" }}>
+            Import book JSON
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) void importDeskBook(f);
+              }}
+            />
+          </label>
+        </div>
         <label className="btn btn-ghost btn-block file-btn" style={{ marginTop: "0.55rem" }}>
           CliffMover day-plan CSV
           <input
@@ -4854,9 +5089,25 @@ export default function App() {
                 <button type="button" className="btn btn-ghost" onClick={() => loadStarterDesk()}>
                   Load starter desk
                 </button>
-              ) : (
-                <button type="button" className="btn btn-ghost" onClick={() => void onSyncDrive()}>
+              ) : apiAvailable !== false ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={apiAvailable === null}
+                  onClick={() => void onSyncDrive()}
+                >
                   Sync Drop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setTab("more");
+                    setMorePane("import");
+                  }}
+                >
+                  Import files
                 </button>
               )}
             </div>
@@ -5380,8 +5631,6 @@ export default function App() {
           onClick={() => {
             setTab("today");
             setTodayMode("desk");
-            const pill = viewLead || dayLead;
-            if (pill?.company.phone) dial(pill.company);
           }}
         >
           <strong className="mono">{toDialCount}</strong>

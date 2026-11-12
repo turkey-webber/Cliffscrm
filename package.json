@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:api": "newman run postman/collections/cliffscrm-apis.postman_collection.json -e postman/environments/local.postman_environment.json --color off",
     "test:api:ci": "newman run postman/collections/cliffscrm-apis.postman_collection.json -e postman/environments/local.postman_environment.json --reporters cli,junit --reporter-junit-export postman/reports/junit.xml --color off",
-    "test:mpc": "node scripts/test-mpc-retention.mjs"
+    "test:mpc": "node scripts/test-mpc-retention.mjs",
+    "test:persist": "node scripts/test-persist-prune.mjs"
   },
   "dependencies": {
     "mammoth": "^1.13.0",
