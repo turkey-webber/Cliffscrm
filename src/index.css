@@ -521,6 +521,44 @@ button.dial-pill {
   width: 100%;
   min-height: 1.5rem;
 }
+.desk-search {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-shadow: 0 1px 0 rgba(15, 47, 28, 0.06);
+}
+.schedule-panel {
+  margin-bottom: 0.85rem;
+}
+.schedule-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(42vh, 22rem);
+  overflow: auto;
+  margin-top: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #f7faf7;
+  -webkit-overflow-scrolling: touch;
+}
+.schedule-item {
+  width: 100%;
+  text-align: left;
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.75rem 0.7rem;
+}
+.schedule-item:last-child {
+  border-bottom: none;
+}
+.schedule-item.selected {
+  background: #e7f2ea;
+  box-shadow: inset 3px 0 0 var(--green, #1f5c34);
+}
 .travel-add {
   margin-bottom: 0.75rem;
 }
