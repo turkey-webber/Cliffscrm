@@ -288,6 +288,26 @@ export function newMpcId(): string {
   return `mpc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Drop MPC candidates older than 30 days (desk storage is local). */
+export const MPC_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function sortMpcNewestFirst(list: MpcCandidate[]): MpcCandidate[] {
+  return [...list].sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+}
+
+export function pruneExpiredMpc(list: MpcCandidate[], now = Date.now()): MpcCandidate[] {
+  const cutoff = now - MPC_RETENTION_MS;
+  return sortMpcNewestFirst(list.filter((c) => (Number(c.createdAt) || 0) >= cutoff));
+}
+
+/** Join multi-page camera OCR into one resume body. */
+export function joinResumePages(pages: string[]): string {
+  const cleaned = pages.map((p) => p.trim()).filter(Boolean);
+  if (!cleaned.length) return "";
+  if (cleaned.length === 1) return cleaned[0];
+  return cleaned.map((t, i) => `--- Page ${i + 1} ---\n${t}`).join("\n\n");
+}
+
 export function buildCandidate(input: {
   name?: string;
   trade?: string;

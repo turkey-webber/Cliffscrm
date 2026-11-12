@@ -29,9 +29,14 @@ import type { RecallStore } from "./import/types";
 import {
   buildCandidate,
   buildResumeProfile,
+  extractCandidateName,
   fitLabelText,
+  inferTrade,
+  joinResumePages,
   matchMpcToMarket,
+  pruneExpiredMpc,
   rematchCandidate,
+  sortMpcNewestFirst,
   type MpcCandidate,
   type MpcMatch,
 } from "./mpc";
@@ -745,6 +750,9 @@ export default function App() {
   const [mpcDropFolderName, setMpcDropFolderName] = useState(initial.mpcDropFolderName || "");
   const [mpcDropHandle, setMpcDropHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [mpcIngestBusy, setMpcIngestBusy] = useState<string | null>(null);
+  const [cameraDraft, setCameraDraft] = useState<{
+    pages: { text: string; previewUrl: string }[];
+  } | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -754,6 +762,14 @@ export default function App() {
     const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
   }, []);
+  // Drop MPC candidates past the 30-day retention window.
+  useEffect(() => {
+    setMpc((prev) => {
+      const next = pruneExpiredMpc(prev, now);
+      if (next.length === prev.length && next.every((c, i) => c.id === prev[i]?.id)) return prev;
+      return next;
+    });
+  }, [now]);
   useEffect(() => {
     saveRecall(recall);
   }, [recall]);
@@ -1683,10 +1699,81 @@ export default function App() {
       resumeText,
       book: liveCompanies,
     });
-    setMpc((prev) => [candidate, ...prev.filter((c) => c.resumeText !== resumeText)]);
+    setMpc((prev) =>
+      sortMpcNewestFirst([candidate, ...prev.filter((c) => c.resumeText !== resumeText)]),
+    );
     setSelectedMpc(candidate.id);
     if (input.seenId) rememberMpcSeen([input.seenId]);
     return candidate;
+  }
+
+  function clearCameraDraft(draft = cameraDraft) {
+    draft?.pages.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    setCameraDraft(null);
+  }
+
+  async function addCameraPages(files: File[]) {
+    const list = files.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name));
+    if (!list.length) {
+      flash("No photos in that capture");
+      return;
+    }
+    setTab("mpc");
+    setMpcIngestBusy("camera");
+    try {
+      const addedPages: { text: string; previewUrl: string }[] = [];
+      for (const file of list) {
+        const parsed = await parseResumeFromFile(file);
+        if (!parsed.text.trim()) {
+          flash(parsed.warning || `Could not read ${file.name}`);
+          continue;
+        }
+        if (parsed.warning) flash(parsed.warning);
+        addedPages.push({ text: parsed.text, previewUrl: URL.createObjectURL(file) });
+      }
+      if (!addedPages.length) return;
+      const nextPages = [...(cameraDraft?.pages || []), ...addedPages];
+      const joined = joinResumePages(nextPages.map((p) => p.text));
+      setCameraDraft({ pages: nextPages });
+      setMpcForm((f) => ({
+        ...f,
+        name: f.name.trim() || extractCandidateName(joined),
+        trade: f.trade.trim() || inferTrade(joined),
+        resumeText: joined,
+      }));
+      flash(
+        nextPages.length === 1
+          ? "Page 1 ready — add another page or finish"
+          : `${nextPages.length} pages ready — add another or finish`,
+      );
+    } finally {
+      setMpcIngestBusy(null);
+    }
+  }
+
+  async function finishCameraDraft() {
+    if (!cameraDraft?.pages.length) {
+      flash("Capture at least one page first");
+      return;
+    }
+    setMpcBusy(true);
+    try {
+      const resumeText = joinResumePages(cameraDraft.pages.map((p) => p.text));
+      const pageNote =
+        cameraDraft.pages.length > 1 ? `${cameraDraft.pages.length}-page capture` : "";
+      const candidate = ingestResumeCandidate({
+        resumeText,
+        name: mpcForm.name,
+        trade: mpcForm.trade,
+        note: [mpcForm.note, pageNote].filter(Boolean).join(" · "),
+        source: "camera",
+      });
+      clearCameraDraft();
+      setMpcForm({ name: "", trade: "", note: "", resumeText: "" });
+      flash(candidate ? `${candidate.name} · ${candidate.matches.length} matches` : "No resume text");
+    } finally {
+      setMpcBusy(false);
+    }
   }
 
   async function submitMpc() {
@@ -1704,6 +1791,7 @@ export default function App() {
         note: mpcForm.note,
         source: "paste",
       });
+      clearCameraDraft();
       setMpcForm({ name: "", trade: "", note: "", resumeText: "" });
       flash(candidate ? `${candidate.matches.length} company matches` : "No resume text");
     } finally {
@@ -1713,9 +1801,9 @@ export default function App() {
 
   async function ingestResumeFiles(
     files: File[],
-    source: "camera" | "file" | "folder",
+    source: "file" | "folder",
   ) {
-    const list = [...files].filter((f) => isResumeFileName(f.name, f.type) || source === "camera");
+    const list = [...files].filter((f) => isResumeFileName(f.name, f.type));
     if (!list.length) {
       flash("No resume-like files in that selection");
       return;
@@ -2764,8 +2852,8 @@ export default function App() {
         <div className="panel">
           <h2>Receive candidate</h2>
           <p className="subtle" style={{ marginTop: "0.35rem" }}>
-            Forward resumes to cliffsgrokbox@gmail.com, shoot a photo on iPhone, pick files, or watch a
-            desktop folder.
+            Forward resumes to cliffsgrokbox@gmail.com, shoot multi-page photos on iPhone (auto-crop + OCR),
+            pick files, or watch a desktop folder. Candidates auto-clear after 30 days.
           </p>
           <div className="row wrap" style={{ marginTop: "0.75rem" }}>
             <button
@@ -2782,9 +2870,61 @@ export default function App() {
               disabled={!!mpcIngestBusy}
               onClick={() => cameraInputRef.current?.click()}
             >
-              {mpcIngestBusy === "camera" ? "Reading…" : "iPhone camera"}
+              {mpcIngestBusy === "camera"
+                ? "Cropping & reading…"
+                : cameraDraft?.pages.length
+                  ? "Capture another page"
+                  : "iPhone camera"}
             </button>
           </div>
+          {!!cameraDraft?.pages.length && (
+            <div className="panel-box mpc-camera-draft" style={{ marginTop: "0.75rem" }}>
+              <strong>
+                Camera draft · {cameraDraft.pages.length} page{cameraDraft.pages.length === 1 ? "" : "s"}
+              </strong>
+              <p className="subtle">
+                Each page is auto-cropped and parsed. Add more pages for the same candidate, then finish.
+              </p>
+              <div className="mpc-page-thumbs" aria-label="Captured pages">
+                {cameraDraft.pages.map((p, i) => (
+                  <div key={p.previewUrl} className="mpc-page-thumb">
+                    <img src={p.previewUrl} alt={`Page ${i + 1}`} />
+                    <span>p{i + 1}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="row wrap" style={{ marginTop: "0.55rem" }}>
+                <button
+                  className="btn btn-accent"
+                  style={{ flex: "1 1 8rem" }}
+                  disabled={!!mpcIngestBusy || mpcBusy}
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  Add page
+                </button>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: "1 1 8rem" }}
+                  disabled={!!mpcIngestBusy || mpcBusy}
+                  onClick={() => void finishCameraDraft()}
+                >
+                  {mpcBusy ? "Matching…" : "Finish & match"}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: "1 1 8rem" }}
+                  disabled={!!mpcIngestBusy || mpcBusy}
+                  onClick={() => {
+                    clearCameraDraft();
+                    setMpcForm((f) => ({ ...f, resumeText: "" }));
+                    flash("Camera draft cancelled");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           <div className="row wrap" style={{ marginTop: "0.55rem" }}>
             <button
               className="btn btn-ghost"
@@ -2820,7 +2960,7 @@ export default function App() {
             <p className="subtle" style={{ marginTop: "0.55rem" }}>
               {supportsDirectoryPicker()
                 ? "Desktop: choose a folder to keep as your resume drop."
-                : "On iPhone use Camera or Choose files. Folder watch needs desktop Chrome/Edge."}
+                : "On iPhone: Camera for multi-page resumes, or Choose files. Folder watch needs desktop Chrome/Edge."}
             </p>
           )}
           <input
@@ -2832,7 +2972,7 @@ export default function App() {
             onChange={(e) => {
               const files = e.target.files ? [...e.target.files] : [];
               e.target.value = "";
-              if (files.length) void ingestResumeFiles(files, "camera");
+              if (files.length) void addCameraPages(files);
             }}
           />
           <input
@@ -3017,7 +3157,10 @@ export default function App() {
         {!!mpc.length && (
           <div className="card">
             <h2>Recent candidates</h2>
-            {mpc.slice(0, 8).map((c) => (
+            <p className="subtle">Newest first · removed automatically after 30 days</p>
+            {sortMpcNewestFirst(mpc)
+              .slice(0, 8)
+              .map((c) => (
               <button
                 key={c.id}
                 className="list-item"
@@ -3030,6 +3173,8 @@ export default function App() {
                   </strong>
                   <div className="muted">
                     {matchMpcToMarket(liveCompanies, c.resumeText, c.trade, c.name).length} matches
+                    {" · "}
+                    {new Date(c.createdAt).toLocaleDateString()}
                   </div>
                 </div>
               </button>
