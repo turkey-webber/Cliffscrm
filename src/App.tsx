@@ -782,6 +782,7 @@ export default function App() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const deskSearchRef = useRef<HTMLInputElement>(null);
 
   // Locks last 10m — tick slowly so we don't re-render / rewrite storage every second.
   useEffect(() => {
@@ -1021,6 +1022,88 @@ export default function App() {
     if (!syncedDeskLeadId || syncedDeskLeadId === activeId) return;
     setActiveId(syncedDeskLeadId);
   }, [todayMode, tab, syncedDeskLeadId, activeId]);
+
+  // Laptop dial session shortcuts — ignored while typing in fields.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (wrapDraft || editDraft || captureOpen || scriptOpen || copySheet) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName?.toLowerCase();
+      const typing =
+        tag === "input" || tag === "textarea" || tag === "select" || t?.isContentEditable;
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        setTab("today");
+        setTodayMode("desk");
+        deskSearchRef.current?.focus();
+        deskSearchRef.current?.select();
+        return;
+      }
+      if (typing) return;
+      if (tab === "today" && todayMode === "desk") {
+        if (e.key === "j" || e.key === "ArrowDown") {
+          e.preventDefault();
+          stepDeskLead(1);
+          return;
+        }
+        if (e.key === "k" || e.key === "ArrowUp") {
+          e.preventDefault();
+          stepDeskLead(-1);
+          return;
+        }
+        const lead = viewLead?.company;
+        if (!lead) return;
+        if (e.key === "Enter") {
+          e.preventDefault();
+          setActiveId(lead.id);
+          if (lead.phone) dial(lead);
+          else openWrap(lead, "got_them");
+          return;
+        }
+        if (e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          skipWithoutWrap(lead);
+          return;
+        }
+        if (e.key === "v" || e.key === "V") {
+          e.preventDefault();
+          setActiveId(lead.id);
+          claim(lead.id);
+          pendingScore.current = { result: "voicemail", points: 0 };
+          openWrap(lead, "voicemail");
+          return;
+        }
+        if (e.key === "a" || e.key === "A") {
+          e.preventDefault();
+          setActiveId(lead.id);
+          claim(lead.id);
+          applyResult("appointment", lead);
+          return;
+        }
+        if (e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          setActiveId(lead.id);
+          openWrap(lead, "got_them");
+          return;
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dial session hotkeys
+  }, [
+    tab,
+    todayMode,
+    viewLead,
+    wrapDraft,
+    editDraft,
+    captureOpen,
+    scriptOpen,
+    copySheet,
+    searchedNextList,
+    filteredNextList,
+    activeId,
+  ]);
 
   const viewLeadId = viewLead?.company.id;
   const viewLeadNotes = viewLead?.company.notes;
@@ -1506,16 +1589,28 @@ export default function App() {
     setActiveId(companyId);
     setTodayMode("desk");
     setTab("today");
-    window.requestAnimationFrame(() => {
-      const esc =
-        typeof CSS !== "undefined" && typeof CSS.escape === "function"
-          ? CSS.escape(companyId)
-          : companyId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      document
-        .querySelector(`[data-schedule-id="${esc}"]`)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      document.getElementById("desk-dial-cockpit")?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
+    // Phone: scroll selected into view. Laptop split keeps both panes visible.
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 899px)").matches) {
+      window.requestAnimationFrame(() => {
+        const esc =
+          typeof CSS !== "undefined" && typeof CSS.escape === "function"
+            ? CSS.escape(companyId)
+            : companyId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        document
+          .querySelector(`[data-schedule-id="${esc}"]`)
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        document.getElementById("desk-dial-cockpit")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    }
+  }
+
+  function stepDeskLead(delta: number) {
+    const queue = searchedNextList.length ? searchedNextList : filteredNextList;
+    if (!queue.length) return;
+    const curId = viewLead?.company.id || activeId;
+    const idx = Math.max(0, queue.findIndex((n) => n.company.id === curId));
+    const next = queue[(idx + delta + queue.length) % queue.length];
+    if (next) selectDeskLead(next.company.id);
   }
 
   /** Skip does not open wrap-up — no notes required; just move to the next scheduled call. */
@@ -2236,6 +2331,7 @@ export default function App() {
             {OFFICE.agentName.split(" ")[0]} · Express Montgomery — one next step, then Dialer, Today, or Scout.
           </p>
         </div>
+        <div className="home-desktop">
         {nextCompany ? (
           <div className="home-next">
             <p className="home-next-label">Next up · {todayMode === "car" ? "Car" : "Office"}</p>
@@ -2327,77 +2423,80 @@ export default function App() {
             )}
           </div>
         )}
-        <div className="home-focus" aria-label="Now next later">
-          <button
-            type="button"
-            className="on"
-            onClick={() => {
-              setTodayMode("desk");
-              setTab("today");
-            }}
-          >
-            Now · Dialer
-          </button>
-          <button
-            type="button"
-            onClick={() => (q4Pending ? setTab("q4") : setTab("today"))}
-          >
-            Next · {q4Pending ? `Q4 (${q4Pending})` : "Car / travel"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setTab("more");
-              setMorePane("scout");
-              setScoutPane("briefing");
-            }}
-          >
-            Later · Scout
-          </button>
-        </div>
-        <div className="home-stats" aria-label="Day snapshot">
-          <div className="home-stat">
-            <strong className="mono">{toDialCount}</strong>
-            <span>To dial</span>
+        <div className="home-side">
+          <div className="home-focus" aria-label="Now next later">
+            <button
+              type="button"
+              className="on"
+              onClick={() => {
+                setTodayMode("desk");
+                setTab("today");
+              }}
+            >
+              Now · Dialer
+            </button>
+            <button
+              type="button"
+              onClick={() => (q4Pending ? setTab("q4") : setTab("today"))}
+            >
+              Next · {q4Pending ? `Q4 (${q4Pending})` : "Car / travel"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTab("more");
+                setMorePane("scout");
+                setScoutPane("briefing");
+              }}
+            >
+              Later · Scout
+            </button>
           </div>
-          <div className="home-stat">
-            <strong className="mono">
-              {callsDone}/{OFFICE.callGoal}
-            </strong>
-            <span>Calls</span>
+          <div className="home-stats" aria-label="Day snapshot">
+            <div className="home-stat">
+              <strong className="mono">{toDialCount}</strong>
+              <span>To dial</span>
+            </div>
+            <div className="home-stat">
+              <strong className="mono">
+                {callsDone}/{OFFICE.callGoal}
+              </strong>
+              <span>Calls</span>
+            </div>
+            <div className="home-stat">
+              <strong className="mono">
+                {visitsDone}/{OFFICE.visitGoal}
+              </strong>
+              <span>Visits</span>
+            </div>
           </div>
-          <div className="home-stat">
-            <strong className="mono">
-              {visitsDone}/{OFFICE.visitGoal}
-            </strong>
-            <span>Visits</span>
+          <div className="widget-grid" aria-label="Primary tools">
+            {HOME_WIDGETS.map((w) => {
+              const badge = widgetBadges[w.id];
+              return (
+                <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
+                  <div className="widget-head">
+                    <span className="widget-icon">{w.label.slice(0, 1)}</span>
+                    {badge ? <span className="widget-badge">{badge > 99 ? "99+" : badge}</span> : null}
+                  </div>
+                  <span className="widget-label">{w.label}</span>
+                  <span className="widget-blurb">{w.blurb}</span>
+                </button>
+              );
+            })}
           </div>
-        </div>
-        <div className="widget-grid" aria-label="Primary tools">
-          {HOME_WIDGETS.map((w) => {
-            const badge = widgetBadges[w.id];
-            return (
+          <div className="widget-grid" style={{ marginTop: "0.35rem", opacity: 0.92 }} aria-label="More tools">
+            {HOME_MORE_WIDGETS.map((w) => (
               <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
                 <div className="widget-head">
                   <span className="widget-icon">{w.label.slice(0, 1)}</span>
-                  {badge ? <span className="widget-badge">{badge > 99 ? "99+" : badge}</span> : null}
                 </div>
                 <span className="widget-label">{w.label}</span>
                 <span className="widget-blurb">{w.blurb}</span>
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
-        <div className="widget-grid" style={{ marginTop: "0.65rem", opacity: 0.92 }} aria-label="More tools">
-          {HOME_MORE_WIDGETS.map((w) => (
-            <button key={w.id} type="button" className="widget-tile" onClick={() => openHomeWidget(w.id)}>
-              <div className="widget-head">
-                <span className="widget-icon">{w.label.slice(0, 1)}</span>
-              </div>
-              <span className="widget-label">{w.label}</span>
-              <span className="widget-blurb">{w.blurb}</span>
-            </button>
-          ))}
         </div>
       </>
     );
@@ -2424,7 +2523,7 @@ export default function App() {
           <h1>Today</h1>
           <p>
             {todayMode === "desk"
-              ? "Search or scroll the scheduled list, pick who to call. Skip needs no notes. Goal = appointment."
+              ? "Pick who to call — list + dialer side-by-side on laptop. Skip needs no notes. Goal = appointment."
               : "Car — navigate stops; Arrived logs the visit"}
             {` · ${deskItems.length} in view`}
             {deskQuery.trim() && filteredNextList.length !== deskItems.length
@@ -2432,11 +2531,17 @@ export default function App() {
               : ""}
             {inbox.length ? ` · ${inbox.length} capture` : ""}
           </p>
+          {todayMode === "desk" ? (
+            <p className="desk-keys-hint">
+              / search · j/k move · Enter call · a appt · v VM · s skip · w wrap
+            </p>
+          ) : null}
         </div>
         {todayMode === "desk" ? (
           <div className="search desk-search">
             <span className="subtle">⌕</span>
             <input
+              ref={deskSearchRef}
               placeholder="Search scheduled calls…"
               value={deskQuery}
               onChange={(e) => setDeskQuery(e.target.value)}
@@ -2553,50 +2658,6 @@ export default function App() {
             {q4Pending ? ` · ${q4Pending} Q4` : ""}
           </span>
         </div>
-        {todayMode === "desk" && !!filteredNextList.length && (
-          <div className="panel schedule-panel">
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-              <h2 style={{ margin: 0 }}>Scheduled calls</h2>
-              <span className="subtle">{deskItems.length} shown</span>
-            </div>
-            <p className="subtle" style={{ marginTop: "0.35rem" }}>
-              Tap a company to open it in the dialer — call who you prioritize.
-            </p>
-            {!deskItems.length ? (
-              <p className="empty">No matches — clear search or try All.</p>
-            ) : (
-              <div className="schedule-list" role="listbox" aria-label="Scheduled calls">
-                {deskItems.map((item) => {
-                  const selected = lead?.company.id === item.company.id;
-                  return (
-                    <button
-                      key={item.company.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      data-schedule-id={item.company.id}
-                      className={`list-item schedule-item${selected ? " selected" : ""}`}
-                      onClick={() => selectDeskLead(item.company.id)}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <strong>
-                          {item.motion.toUpperCase()} · {item.company.name}
-                        </strong>
-                        <div className="muted">
-                          {item.why}
-                          {item.company.phone ? ` · ${item.company.phone}` : " · No phone"}
-                          {item.company.contactName ? ` · ${item.company.contactName}` : ""}
-                        </div>
-                        <BadgeRow c={item.company} />
-                      </div>
-                      {selected ? <span className="chip">Selected</span> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
         {!filteredNextList.length && (
           <div className="demo-banner">
             {!liveCompanies.length
@@ -2658,153 +2719,263 @@ export default function App() {
             )}
           </div>
         )}
-        {todayMode === "desk" && lead && (
-          <div className="dial-cockpit" id="desk-dial-cockpit">
-            <div className="hero-call">
-              <p className="eyebrow">Selected · {lead.motion}</p>
-              <h2>{lead.company.name}</h2>
-              <p>
-                {lead.why}
-                {lead.company.contactName ? ` · ${lead.company.contactName}` : ""}
-                {lead.company.contactTitle ? ` · ${lead.company.contactTitle}` : ""}
-              </p>
-              <p className="dial-phone mono">{lead.company.phone || "No phone on file"}</p>
-              <div className="row wrap" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
-                <button type="button" className="btn btn-ghost" onClick={() => openContactEdit(lead.company)}>
-                  Edit contact
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    setActiveId(lead.company.id);
-                    claim(lead.company.id);
-                    applyResult("appointment", lead.company);
-                  }}
-                >
-                  Appointment
-                </button>
-              </div>
-              <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-lg"
-                  style={{ flex: 1, minWidth: "8rem" }}
-                  onClick={() => {
-                    setActiveId(lead.company.id);
-                    dial(lead.company);
-                  }}
-                >
-                  Call
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
-                  onClick={() => {
-                    setActiveId(lead.company.id);
-                    setScriptOpen(true);
-                  }}
-                >
-                  Full scripts
-                </button>
-              </div>
-              <label className="auto-dial-toggle">
-                <input
-                  type="checkbox"
-                  checked={autoDialNext}
-                  onChange={(e) => setAutoDialNext(e.target.checked)}
-                />
-                Auto-dial next after wrap
-              </label>
-            </div>
-
-            <div className="dial-suggest panel">
+        {todayMode === "desk" && !!filteredNextList.length ? (
+          <div className="desktop-split today-desk-split">
+            <div className="panel schedule-panel">
               <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-                <h2 style={{ margin: 0 }}>Suggestions</h2>
-                <span className="subtle">
-                  {suggestBusy ? "Refreshing…" : dialSuggestions?.provider === "grok" ? "Grok + app" : "App"}
-                </span>
+                <h2 style={{ margin: 0 }}>Scheduled calls</h2>
+                <span className="subtle">{deskItems.length} shown</span>
               </div>
+              <p className="subtle" style={{ marginTop: "0.35rem" }}>
+                Click a company to dial it — prioritize freely.
+              </p>
+              {!deskItems.length ? (
+                <p className="empty">No matches — clear search or try All.</p>
+              ) : (
+                <div className="schedule-list" role="listbox" aria-label="Scheduled calls">
+                  {deskItems.map((item) => {
+                    const selected = lead?.company.id === item.company.id;
+                    return (
+                      <button
+                        key={item.company.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        data-schedule-id={item.company.id}
+                        className={`list-item schedule-item${selected ? " selected" : ""}`}
+                        onClick={() => selectDeskLead(item.company.id)}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>
+                            {item.motion.toUpperCase()} · {item.company.name}
+                          </strong>
+                          <div className="muted">
+                            {item.why}
+                            {item.company.phone ? ` · ${item.company.phone}` : " · No phone"}
+                            {item.company.contactName ? ` · ${item.company.contactName}` : ""}
+                          </div>
+                          <BadgeRow c={item.company} />
+                        </div>
+                        {selected ? <span className="chip">Selected</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {lead ? (
+              <div className="dial-cockpit" id="desk-dial-cockpit">
+                <div className="hero-call">
+                  <p className="eyebrow">Selected · {lead.motion}</p>
+                  <h2>{lead.company.name}</h2>
+                  <p>
+                    {lead.why}
+                    {lead.company.contactName ? ` · ${lead.company.contactName}` : ""}
+                    {lead.company.contactTitle ? ` · ${lead.company.contactTitle}` : ""}
+                  </p>
+                  <p className="dial-phone mono">{lead.company.phone || "No phone on file"}</p>
+                  <div className="row wrap" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
+                    <button type="button" className="btn btn-ghost" onClick={() => openContactEdit(lead.company)}>
+                      Edit contact
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        claim(lead.company.id);
+                        applyResult("appointment", lead.company);
+                      }}
+                    >
+                      Appointment
+                    </button>
+                  </div>
+                  <div className="row wrap" style={{ marginTop: "0.85rem", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-lg"
+                      style={{ flex: 1, minWidth: "8rem" }}
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        dial(lead.company);
+                      }}
+                    >
+                      Call
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ color: "#eef5ef", borderColor: "#3a4a42" }}
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        setScriptOpen(true);
+                      }}
+                    >
+                      Full scripts
+                    </button>
+                  </div>
+                  <div className="desk-inline-actions" role="toolbar" aria-label="Call actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        dial(lead.company);
+                      }}
+                    >
+                      Call
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-accent"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        claim(lead.company.id);
+                        applyResult("appointment", lead.company);
+                      }}
+                    >
+                      Appt
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        claim(lead.company.id);
+                        pendingScore.current = { result: "voicemail", points: 0 };
+                        openWrap(lead.company, "voicemail");
+                      }}
+                    >
+                      VM
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        claim(lead.company.id);
+                        skipWithoutWrap(lead.company);
+                      }}
+                    >
+                      Skip
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setActiveId(lead.company.id);
+                        openWrap(lead.company, "got_them");
+                      }}
+                    >
+                      Wrap
+                    </button>
+                  </div>
+                  <label className="auto-dial-toggle">
+                    <input
+                      type="checkbox"
+                      checked={autoDialNext}
+                      onChange={(e) => setAutoDialNext(e.target.checked)}
+                    />
+                    Auto-dial next after wrap
+                  </label>
+                </div>
+
+                <div className="dial-suggest panel">
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                    <h2 style={{ margin: 0 }}>Suggestions</h2>
+                    <span className="subtle">
+                      {suggestBusy ? "Refreshing…" : dialSuggestions?.provider === "grok" ? "Grok + app" : "App"}
+                    </span>
+                  </div>
                   {((dialSuggestions && viewLeadId === lead.company.id
                     ? dialSuggestions
                     : suggestFor(lead.company))).blocks
-                .filter((b) => b.id === "opener" || b.id === "why" || b.id === "ask" || b.id === "desk")
-                .map((b) => {
-                  const dossierOpener =
-                    b.id === "opener"
-                      ? dossierById[lead.company.id]?.weinbergOpener || buildCompanyDossier(lead.company).weinbergOpener
-                      : null;
-                  const body = dossierOpener || b.body;
-                  return (
-                  <div key={b.id} className="suggest-block">
-                    <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
-                      <strong>{b.title}{dossierOpener ? " · Weinberg" : ""}</strong>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ padding: "0.25rem 0.55rem", fontSize: "0.75rem" }}
-                        onClick={() => void copyText(body, b.title)}
-                      >
-                        Copy
-                      </button>
-                    </div>
-                    <p>{body}</p>
-                  </div>
-                  );
-                })}
-              <details className="suggest-objections">
-                <summary>Objections</summary>
-                {((dialSuggestions && viewLeadId === lead.company.id
-                  ? dialSuggestions
-                  : suggestFor(lead.company))).objections.map((o) => (
-                  <div key={o.label} className="suggest-block">
-                    <strong>{o.label}</strong>
-                    <p className="muted">{o.reply}</p>
-                  </div>
-                ))}
-              </details>
-            </div>
-
-            <div className="dial-notes panel">
-              <h2>Notes & comments</h2>
-              {lead.company.notes?.trim() ? (
-                <pre className="notes-pre">{lead.company.notes.trim()}</pre>
-              ) : (
-                <p className="empty">No notes yet — wrap-ups and captures land here.</p>
-              )}
-              {!!lead.company.research?.length && (
-                <>
-                  <h3>Research</h3>
-                  <ul className="research-list">
-                    {lead.company.research.slice(0, 6).map((r, i) => (
-                      <li key={`${r.source}-${i}`}>
-                        <strong>{r.source}</strong>
-                        {r.date ? ` · ${r.date}` : ""} — {r.fact}
-                      </li>
+                    .filter((b) => b.id === "opener" || b.id === "why" || b.id === "ask" || b.id === "desk")
+                    .map((b) => {
+                      const dossierOpener =
+                        b.id === "opener"
+                          ? dossierById[lead.company.id]?.weinbergOpener ||
+                            buildCompanyDossier(lead.company).weinbergOpener
+                          : null;
+                      const body = dossierOpener || b.body;
+                      return (
+                        <div key={b.id} className="suggest-block">
+                          <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                            <strong>
+                              {b.title}
+                              {dossierOpener ? " · Weinberg" : ""}
+                            </strong>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: "0.25rem 0.55rem", fontSize: "0.75rem" }}
+                              onClick={() => void copyText(body, b.title)}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <p>{body}</p>
+                        </div>
+                      );
+                    })}
+                  <details className="suggest-objections">
+                    <summary>Objections</summary>
+                    {((dialSuggestions && viewLeadId === lead.company.id
+                      ? dialSuggestions
+                      : suggestFor(lead.company))).objections.map((o) => (
+                      <div key={o.label} className="suggest-block">
+                        <strong>{o.label}</strong>
+                        <p className="muted">{o.reply}</p>
+                      </div>
                     ))}
-                  </ul>
-                </>
-              )}
-              {!!(lead.company.timeline || []).length && (
-                <>
-                  <h3>Timeline</h3>
-                  <ul className="timeline-list">
-                    {[...(lead.company.timeline || [])]
-                      .slice(-8)
-                      .reverse()
-                      .map((t) => (
-                        <li key={t.id}>
-                          <span className="subtle">{t.kind}</span> · {t.summary}
-                          {t.detail ? <div className="muted">{t.detail}</div> : null}
-                        </li>
-                      ))}
-                  </ul>
-                </>
-              )}
-            </div>
+                  </details>
+                </div>
+
+                <div className="dial-notes panel">
+                  <h2>Notes & comments</h2>
+                  {lead.company.notes?.trim() ? (
+                    <pre className="notes-pre">{lead.company.notes.trim()}</pre>
+                  ) : (
+                    <p className="empty">No notes yet — wrap-ups and captures land here.</p>
+                  )}
+                  {!!lead.company.research?.length && (
+                    <>
+                      <h3>Research</h3>
+                      <ul className="research-list">
+                        {lead.company.research.slice(0, 6).map((r, i) => (
+                          <li key={`${r.source}-${i}`}>
+                            <strong>{r.source}</strong>
+                            {r.date ? ` · ${r.date}` : ""} — {r.fact}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {!!(lead.company.timeline || []).length && (
+                    <>
+                      <h3>Timeline</h3>
+                      <ul className="timeline-list">
+                        {[...(lead.company.timeline || [])]
+                          .slice(-8)
+                          .reverse()
+                          .map((t) => (
+                            <li key={t.id}>
+                              <span className="subtle">{t.kind}</span> · {t.summary}
+                              {t.detail ? <div className="muted">{t.detail}</div> : null}
+                            </li>
+                          ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="panel">
+                <p className="empty">Select a scheduled call to open the dialer.</p>
+              </div>
+            )}
           </div>
-        )}
+        ) : null}
         {(csFile || plannerFile || importLog) && (
           <div className="panel">
             <p className="subtle" style={{ marginTop: 0 }}>
@@ -3511,11 +3682,11 @@ export default function App() {
             </button>
           </div>
         ) : null}
-        <div className="card">
+        <div className="card accounts-list">
           {!filtered.length && liveCompanies.length ? <p className="empty">No companies match.</p> : null}
           {filtered.map((c) => (
             <div key={c.id} className="list-item">
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <strong>{c.name}</strong>
                 <div className="muted">
                   {c.contactName || c.contactTitle || "Contact TBD"}
@@ -3524,7 +3695,7 @@ export default function App() {
                 </div>
                 <BadgeRow c={c} />
               </div>
-              <div className="stack">
+              <div className="accounts-actions">
                 <button className="btn btn-primary" onClick={() => dial(c)}>
                   Call
                 </button>
@@ -5614,7 +5785,11 @@ export default function App() {
                   : "Today desk";
 
   return (
-    <div className={`app-shell${showDayBar ? " has-daybar" : ""}${tab === "today" || tab === "mpc" ? " has-filter-rail" : ""}`}>
+    <div
+      className={`app-shell${showDayBar ? " has-daybar" : ""}${
+        tab === "today" && todayMode === "desk" && filteredNextList.length ? " has-desk-split" : ""
+      }${tab === "today" || tab === "mpc" ? " has-filter-rail" : ""}`}
+    >
       <header className="topbar">
         <div className="brand-block">
           <p className="brand-kicker">Express · Montgomery</p>
@@ -5821,7 +5996,7 @@ export default function App() {
           })}
         </div>
         <p className="tabbar-hint" aria-hidden="true">
-          Drag left for more
+          Swipe for more tools
         </p>
       </nav>
 
