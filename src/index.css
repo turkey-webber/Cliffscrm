@@ -53,10 +53,12 @@ h1, h2, h3, .brand-title {
   max-width: 28rem;
   margin: 0 auto;
   position: relative;
+  --shell-max: 28rem;
 }
 @media (min-width: 720px) {
   .app-shell {
-    max-width: 52rem;
+    --shell-max: 52rem;
+    max-width: var(--shell-max);
     border-left: 1px solid #1a2a22;
     border-right: 1px solid #1a2a22;
   }
@@ -67,9 +69,25 @@ h1, h2, h3, .brand-title {
   }
   .desktop-split {
     display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 1.25rem;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 1.1rem;
     align-items: start;
+  }
+}
+@media (min-width: 900px) {
+  .app-shell {
+    --shell-max: 68rem;
+    max-width: var(--shell-max);
+  }
+  .desktop-split {
+    grid-template-columns: 1.05fr 1.15fr;
+    gap: 1.35rem;
+  }
+}
+@media (min-width: 1100px) {
+  .app-shell {
+    --shell-max: 78rem;
+    max-width: var(--shell-max);
   }
 }
 .topbar {
@@ -127,6 +145,9 @@ button.dial-pill {
 }
 .app-shell.has-daybar .main {
   padding-bottom: 12.5rem;
+}
+.app-shell.has-desk-split.has-daybar .main {
+  padding-bottom: 6.5rem;
 }
 .day-progress {
   display: flex;
@@ -272,6 +293,42 @@ button.dial-pill {
   color: var(--ink);
 }
 .dial-cockpit { display: flex; flex-direction: column; gap: 0; }
+.desk-inline-actions {
+  display: none;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+.desk-inline-actions .btn {
+  min-height: 2.65rem;
+  font-weight: 700;
+}
+.desk-keys-hint {
+  display: none;
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--subtle);
+}
+.today-desk-split {
+  margin-top: 0.15rem;
+}
+.today-desk-split .schedule-panel,
+.today-desk-split .dial-cockpit {
+  margin: 0;
+}
+.accounts-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.home-desktop {
+  display: contents;
+}
+.home-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
 .car-cockpit {
   display: flex;
   flex-direction: column;
@@ -754,13 +811,86 @@ textarea { min-height: 6.5rem; resize: vertical; }
 }
 @media (min-width: 720px) {
   .fab {
-    right: max(1rem, calc(50% - 25rem));
+    right: max(1rem, calc(50% - (var(--shell-max) / 2) + 0.75rem));
   }
   .day-action-bar {
-    width: min(52rem, calc(100% - 1.5rem));
+    width: min(var(--shell-max), calc(100% - 1.5rem));
   }
   .tabbar {
-    width: min(52rem, 100%);
+    width: min(var(--shell-max), 100%);
+  }
+  .sheet-card {
+    width: min(36rem, 100%);
+  }
+  .tabbar-scroll .tabbar-track {
+    justify-content: space-between;
+    overflow: visible;
+  }
+  .tabbar-scroll .tab {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .tabbar-hint {
+    display: none;
+  }
+  .accounts-list .list-item {
+    align-items: center;
+  }
+  .accounts-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .accounts-actions .btn {
+    min-height: 2.25rem;
+    padding: 0.35rem 0.7rem;
+  }
+  .home-desktop {
+    display: grid;
+    grid-template-columns: 1.25fr 0.85fr;
+    gap: 1.15rem;
+    align-items: start;
+  }
+}
+@media (min-width: 900px) {
+  .app-shell.has-desk-split .day-action-bar {
+    display: none;
+  }
+  .app-shell.has-desk-split .capture-fab {
+    bottom: calc(5.5rem + var(--safe-bottom));
+  }
+  .desk-inline-actions {
+    display: grid;
+  }
+  .desk-keys-hint {
+    display: block;
+  }
+  .today-desk-split .schedule-panel {
+    position: sticky;
+    top: 0.35rem;
+    align-self: start;
+    max-height: calc(100dvh - 11rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .today-desk-split .schedule-list {
+    max-height: none;
+    flex: 1;
+    min-height: 12rem;
+  }
+  .today-desk-split .dial-cockpit {
+    position: sticky;
+    top: 0.35rem;
+    align-self: start;
+    max-height: calc(100dvh - 11rem);
+    overflow: auto;
+    padding-bottom: 0.5rem;
+  }
+  .desk-search {
+    position: sticky;
+    top: 0;
+    z-index: 4;
   }
 }
 .capture-fab {
